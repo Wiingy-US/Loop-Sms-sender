@@ -34,12 +34,13 @@
   .hint{font-size:12px; color:var(--muted); margin:5px 0 0}
   .row{display:flex; gap:12px; flex-wrap:wrap}
   .row .field{flex:1; min-width:180px}
-  input,textarea{
+  input,textarea,select{
     width:100%; font-family:var(--mono); font-size:14px; color:var(--ink);
     background:#FBFCFD; border:1px solid var(--line); border-radius:9px;
     padding:10px 12px; resize:vertical;
   }
-  input:focus,textarea:focus{outline:2px solid var(--accent); outline-offset:1px; border-color:var(--accent)}
+  select{resize:none; cursor:pointer}
+  input:focus,textarea:focus,select:focus{outline:2px solid var(--accent); outline-offset:1px; border-color:var(--accent)}
   textarea#message{min-height:80px}
   textarea#recipients{min-height:132px}
   .counter{font-family:var(--mono); font-size:12px; color:var(--muted); float:right; font-weight:400}
@@ -86,7 +87,7 @@
 <body>
 <div class="wrap">
   <header class="top">
-    <p class="kicker">Quo · SMS</p>
+    <p class="kicker">Wiingy &middot; SMS</p>
     <h1>Bulk message sender</h1>
     <p class="sub">Sends one text at a time with a set gap, so you never hit the rate limit.</p>
   </header>
@@ -96,7 +97,7 @@
       <div class="field">
         <label for="password">Access password</label>
         <input id="password" type="password" autocomplete="off" placeholder="the SEND_PASSWORD you set in Vercel" />
-        <p class="hint">Not your Quo key — a password you choose to lock this page.</p>
+        <p class="hint">Not your Quo key &mdash; a password you choose to lock this page.</p>
       </div>
       <div class="field">
         <label for="from">From number <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
@@ -105,16 +106,36 @@
       </div>
     </div>
 
+    <div class="row">
+      <div class="field">
+        <label for="bucket">Bucket</label>
+        <select id="bucket">
+          <option value="">&mdash; select &mdash;</option>
+          <option value="DNS">DNS &ndash; Demo Not Scheduled</option>
+          <option value="DNC">DNC &ndash; Demo Not Completed</option>
+          <option value="DL">DL &ndash; Demo Lost</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="category">Subject category</label>
+        <select id="category">
+          <option value="">&mdash; select &mdash;</option>
+          <option value="Math">Math</option>
+          <option value="Academics">Academics</option>
+        </select>
+      </div>
+    </div>
+
     <div class="field">
       <label for="message">Message <span class="counter" id="msgCount">0 chars</span></label>
-      <textarea id="message" placeholder="Hi {{name}}, quick reminder about your session tomorrow. Reply STOP to opt out."></textarea>
-      <p class="hint">Use <code>{{name}}</code> to drop in each person's name.</p>
+      <textarea id="message" placeholder="Select a bucket and category above to auto-fill, or write your own message."></textarea>
+      <p class="hint">Variables: <code>{{name}}</code> = recipient name, <code>{{subject}}</code> = their subject (from the recipients list).</p>
     </div>
 
     <div class="field">
       <label for="recipients">Recipients <span class="counter" id="recCount">0 valid</span></label>
-      <textarea id="recipients" placeholder="+15555550101, Alex&#10;+15555550102, Sam&#10;+15555550103"></textarea>
-      <p class="hint">One per line. Add a name after a comma to personalize: <code>+1..., Alex</code></p>
+      <textarea id="recipients" placeholder="+15555550101, Alex, Math&#10;+15555550102, Sam, AP Chemistry&#10;+15555550103, Jordan, Economics"></textarea>
+      <p class="hint">One per line: <code>+number, Name, Subject</code> &mdash; the subject replaces <code>{{subject}}</code> in the message.</p>
     </div>
 
     <div class="field" style="max-width:220px">
@@ -132,7 +153,7 @@
     <div class="progress" id="progress">
       <div class="bar"><i id="barFill"></i></div>
       <div class="stats">
-        <span class="live"><span class="dot" id="dot"></span><span id="statusText">Sending…</span></span>
+        <span class="live"><span class="dot" id="dot"></span><span id="statusText">Sending&hellip;</span></span>
         <span id="counts">0 / 0</span>
       </div>
       <div class="log" id="log"></div>
@@ -148,10 +169,78 @@
 
   let running = false, stopRequested = false;
 
-  // live counters
+  // ── Message templates keyed by "BUCKET|CATEGORY" ──
+  const TEMPLATES = {
+    "DNS|Math":
+"Hi {{name}}, is Math sorted for this year?\n\
+\n\
+It’s Wiingy here. You inquired about {{subject}} learning a while back and we never got you booked. That one’s on us, and we’d like to put it right.\n\
+\n\
+Math is the one subject where this year builds straight on last year. A small gap in today’s learning quietly becomes the whole problem by later.\n\
+\n\
+Free trial session, live 1 on 1, see if it’s a fit. You can reply YES and we can pick up from there.",
+
+    "DNC|Math":
+"Hi {{name}}, is Math sorted for this year?\n\
+\n\
+It’s Wiingy here. You booked a {{subject}} session with us earlier this year and it never happened. Life gets busy, no problem at all.\n\
+\n\
+Which means your free trial is still sitting there unused. And in math, 1 on 1 live is where you can ask the question you’d never ask in a class of thirty.\n\
+\n\
+Want us to re-book it? You can reply YES and we can pick up from there.",
+
+    "DL|Math":
+"Hi {{name}}, is Math sorted for this year?\n\
+\n\
+It’s Wiingy here. We’d start with a trial session & match you with a tutor who’s genuinely worth your time and gets exactly what you’re aiming for. Someone who’s spent years mastering it.\n\
+\n\
+Also a few things have changed since, packages are up to 25% off, you can spread payment across months, and you can help choose the tutor now.\n\
+\n\
+New motive, new topics building on old ones. Reply YES to find your match.",
+
+    "DNS|Academics":
+"Hi {{name}}, Back to school already?\n\
+\n\
+It’s Wiingy here. You asked us about {{subject}} lessons a while back and we never got you booked. That one’s on us, and we’d like to put it right.\n\
+\n\
+The first few weeks of term usually decide how the whole year feels. Let us get you a free trial session before then, 1 on 1 live with a tutor picked around what you actually want.\n\
+\n\
+See if it’s a fit. No commitment. You can reply YES and we can pick up from there.",
+
+    "DNC|Academics":
+"Hi {{name}}, Back to school already?\n\
+\n\
+It’s Wiingy here. You booked a {{subject}} session with us earlier this year and it never happened. Life gets busy, no problem at all.\n\
+\n\
+Which means your free trial is still sitting there unused. Choose your own tutor or let us match you. 1 on 1, and you decide how you feel afterwards.\n\
+\n\
+Want us to re-book it? You can reply YES to break the ice.",
+
+    "DL|Academics":
+"Hi {{name}}, Back to school then?\n\
+\n\
+It’s Wiingy here. You met one of our {{subject}} tutors a while back and didn’t carry on. Completely fair.\n\
+\n\
+A few things have changed since: packages are up to 25% off, you can spread payment across months, and you choose your own tutor now rather than being handed one.\n\
+\n\
+Good moment to pick it back up. You can reply YES and we can continue from there.",
+  };
+
+  // ── Auto-fill message when bucket + category change ──
+  function onTemplateChange() {
+    const key = $("bucket").value + "|" + $("category").value;
+    if (TEMPLATES[key]) {
+      $("message").value = TEMPLATES[key];
+      $("message").dispatchEvent(new Event("input"));
+    }
+  }
+  $("bucket").addEventListener("change", onTemplateChange);
+  $("category").addEventListener("change", onTemplateChange);
+
+  // ── Live counters ──
   $("message").addEventListener("input", () => {
     const t = $("message").value;
-    const unicode = /[^\u0000-\u007F]/.test(t);
+    const unicode = /[^ -]/.test(t);
     const per = unicode ? 70 : 160;
     const seg = t.length === 0 ? 0 : Math.ceil(t.length / per);
     $("msgCount").textContent = `${t.length} chars · ${seg} segment${seg === 1 ? "" : "s"}`;
@@ -164,10 +253,11 @@
       .map(l => l.trim())
       .filter(Boolean)
       .map(line => {
-        const comma = line.indexOf(",");
-        const to = (comma === -1 ? line : line.slice(0, comma)).trim();
-        const name = comma === -1 ? "" : line.slice(comma + 1).trim();
-        return { to, name, valid: E164.test(to) };
+        const parts = line.split(",").map(p => p.trim());
+        const to = parts[0] || "";
+        const name = parts[1] || "";
+        const subject = parts[2] || "";
+        return { to, name, subject, valid: E164.test(to) };
       });
   }
   function updateRecCount() {
@@ -178,7 +268,11 @@
   }
 
   const render = (tpl, r) =>
-    tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => (k === "name" && r.name) ? r.name : "");
+    tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => {
+      if (k === "name" && r.name) return r.name;
+      if (k === "subject" && r.subject) return r.subject;
+      return "";
+    });
 
   const shortNum = (n) => n.length > 6 ? n.slice(0, 5) + "…" + n.slice(-2) : n;
 
@@ -263,14 +357,14 @@
             body: JSON.stringify({ password, from, to: r.to, content: render(message, r) }),
           });
           const data = await res.json();
-          if (res.status === 401) { // wrong password — stop the whole run
+          if (res.status === 401) {
             showError("Wrong access password — nothing more was sent.");
             logLine("no", "✕ Wrong access password. Stopped.");
             break;
           }
           if (data.ok) {
             sent++;
-            logLine("ok", `✓ ${shortNum(r.to)}${r.name ? " " + r.name : ""}`);
+            logLine("ok", `✓ ${shortNum(r.to)}${r.name ? " " + r.name : ""}${r.subject ? " [" + r.subject + "]" : ""}`);
           } else {
             failed++; failures.push(r);
             logLine("no", `✕ ${shortNum(r.to)} — ${data.error || "failed"}`);
@@ -309,7 +403,7 @@
       b.className = "btn-ghost";
       b.textContent = `Download ${failures.length} failed`;
       b.onclick = () => download("failed-numbers.txt",
-        failures.map(f => f.name ? `${f.to}, ${f.name}` : f.to).join("\n"));
+        failures.map(f => [f.to, f.name, f.subject].filter(Boolean).join(", ")).join("\n"));
       after.appendChild(b);
     }
     if (stopped) {
@@ -318,7 +412,7 @@
       b.className = "btn-ghost";
       b.textContent = `Download ${remaining.length} not sent`;
       b.onclick = () => download("remaining-numbers.txt",
-        remaining.map(f => f.name ? `${f.to}, ${f.name}` : f.to).join("\n"));
+        remaining.map(f => [f.to, f.name, f.subject].filter(Boolean).join(", ")).join("\n"));
       after.appendChild(b);
     }
   };
