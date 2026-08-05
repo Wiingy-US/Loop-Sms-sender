@@ -54,6 +54,8 @@
   .btn-stop{background:#fff; color:var(--danger); border-color:var(--danger)}
   .btn-ghost{background:#fff; color:var(--ink); border-color:var(--line)}
   .btn-ghost:hover{background:#F4F6F8}
+  .btn-danger-ghost{background:#fff; color:var(--danger); border-color:var(--line); font-size:12px; padding:6px 12px}
+  .btn-danger-ghost:hover{background:var(--danger-weak)}
   .msg{padding:10px 12px; border-radius:9px; font-size:13px; margin-top:4px; display:none}
   .msg.err{display:block; background:var(--danger-weak); color:var(--danger)}
   .progress{margin-top:22px; display:none}
@@ -79,6 +81,23 @@
   .log .no{color:#F0A79C}
   .log .sys{color:#8AA0AB}
   .after{margin-top:12px; display:flex; gap:10px; flex-wrap:wrap}
+
+  /* Run history */
+  .history{margin-top:24px}
+  .history h2{font-size:18px; margin:0 0 12px}
+  .history-empty{color:var(--muted); font-size:13px; font-style:italic}
+  .history-table{width:100%; border-collapse:collapse; font-size:13px}
+  .history-table th{
+    text-align:left; font-weight:600; padding:8px 10px;
+    border-bottom:2px solid var(--line); color:var(--muted); font-size:12px;
+    text-transform:uppercase; letter-spacing:.05em;
+  }
+  .history-table td{padding:8px 10px; border-bottom:1px solid var(--line)}
+  .history-table tr:last-child td{border-bottom:none}
+  .history-table .num{font-family:var(--mono); text-align:right}
+  .history-table .success{color:var(--accent)}
+  .history-table .fail{color:var(--danger)}
+  .history-actions{margin-top:10px; display:flex; gap:8px}
 </style>
 </head>
 <body>
@@ -137,6 +156,15 @@
       </div>
       <div class="log" id="log"></div>
       <div class="after" id="after"></div>
+    </div>
+  </div>
+
+  <div class="history panel" style="margin-top:24px">
+    <h2>Run history</h2>
+    <div id="historyContent"></div>
+    <div class="history-actions" id="historyActions" style="display:none">
+      <button class="btn-ghost" id="exportHistoryBtn" style="font-size:12px;padding:6px 12px">Export all history</button>
+      <button class="btn-danger-ghost" id="clearHistoryBtn">Clear history</button>
     </div>
   </div>
 </div>
@@ -207,10 +235,33 @@
     URL.revokeObjectURL(a.href);
   }
 
+  function downloadCSV(name, text) {
+    var blob = new Blob([text], { type: "text/csv" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   function fmtTime(ms) {
     var s = Math.round(ms / 1000);
     if (s < 60) return s + "s";
     return Math.floor(s / 60) + "m " + (s % 60) + "s";
+  }
+
+  function fmtDate(d) {
+    var months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    var day = d.getDate();
+    var month = months[d.getMonth()];
+    var year = d.getFullYear();
+    var h = d.getHours();
+    var m = d.getMinutes();
+    var ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12;
+    if (h === 0) h = 12;
+    var mm = m < 10 ? "0" + m : "" + m;
+    return month + " " + day + ", " + year + " " + h + ":" + mm + " " + ampm;
   }
 
   function showError(text) {
@@ -220,6 +271,74 @@
   }
   function clearError() { $("error").className = "msg"; }
 
+  // -- Run history (localStorage) --
+  var HISTORY_KEY = "sms_sender_history";
+
+  function getHistory() {
+    try {
+      return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    } catch(e) { return []; }
+  }
+
+  function saveRun(run) {
+    var hist = getHistory();
+    hist.unshift(run);
+    if (hist.length > 50) hist = hist.slice(0, 50);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
+    renderHistory();
+  }
+
+  function renderHistory() {
+    var hist = getHistory();
+    var el = $("historyContent");
+
+    if (hist.length === 0) {
+      el.innerHTML = '<p class="history-empty">No runs yet. History will appear here after your first send.</p>';
+      $("historyActions").style.display = "none";
+      return;
+    }
+
+    $("historyActions").style.display = "flex";
+    var html = '<table class="history-table"><thead><tr>' +
+      '<th>Date</th><th class="num">Total</th><th class="num">Sent</th><th class="num">Failed</th><th class="num">Skipped</th><th>Duration</th>' +
+      '</tr></thead><tbody>';
+
+    for (var i = 0; i < hist.length; i++) {
+      var r = hist[i];
+      var d = new Date(r.timestamp);
+      html += '<tr>' +
+        '<td>' + fmtDate(d) + '</td>' +
+        '<td class="num">' + r.total + '</td>' +
+        '<td class="num success">' + r.sent + '</td>' +
+        '<td class="num fail">' + (r.failed || 0) + '</td>' +
+        '<td class="num">' + (r.skipped || 0) + '</td>' +
+        '<td>' + (r.duration || "-") + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }
+
+  $("clearHistoryBtn").onclick = function() {
+    if (confirm("Clear all run history?")) {
+      localStorage.removeItem(HISTORY_KEY);
+      renderHistory();
+    }
+  };
+
+  $("exportHistoryBtn").onclick = function() {
+    var hist = getHistory();
+    var lines = ["Date,Total,Sent,Failed,Skipped,Duration"];
+    for (var i = 0; i < hist.length; i++) {
+      var r = hist[i];
+      lines.push(fmtDate(new Date(r.timestamp)) + "," + r.total + "," + r.sent + "," + (r.failed||0) + "," + (r.skipped||0) + "," + (r.duration||""));
+    }
+    downloadCSV("sms-run-history.csv", lines.join("\n"));
+  };
+
+  renderHistory();
+
+  // -- Send logic --
   $("stopBtn").onclick = function() {
     stopRequested = true;
     $("stopBtn").disabled = true;
@@ -251,17 +370,21 @@
     $("statusText").textContent = "Sending...";
 
     var total = recipients.length;
-    var sent = 0, failed = 0;
-    var failures = [];
+    var sent = 0, failed = 0, skipped = 0;
+    var results = [];
+    var startTime = Date.now();
     logLine("sys", "Starting - " + total + " messages, " + (gapMs / 1000) + "s gap.");
 
     var i = 0;
     for (; i < total; i++) {
       if (stopRequested) break;
       var r = recipients[i];
+      var entry = { number: r.to, name: r.name, subject: r.subject, status: "", error: "" };
 
       if (!r.valid) {
-        failed++; failures.push(r);
+        skipped++;
+        entry.status = "invalid";
+        entry.error = "Not a valid E.164 number";
         logLine("no", "X " + (r.to || "(blank)") + " - not a valid +number, skipped");
       } else {
         try {
@@ -272,22 +395,34 @@
           });
           var data = await res.json();
           if (res.status === 401) {
+            entry.status = "auth_error";
+            entry.error = "Wrong access password";
+            failed++;
             showError("Wrong access password - nothing more was sent.");
             logLine("no", "X Wrong access password. Stopped.");
+            results.push(entry);
+            i++;
             break;
           }
           if (data.ok) {
             sent++;
+            entry.status = "sent";
             logLine("ok", "OK " + shortNum(r.to) + (r.name ? " " + r.name : "") + (r.subject ? " [" + r.subject + "]" : ""));
           } else {
-            failed++; failures.push(r);
+            failed++;
+            entry.status = "failed";
+            entry.error = data.error || "Unknown error";
             logLine("no", "X " + shortNum(r.to) + " - " + (data.error || "failed"));
           }
         } catch (err) {
-          failed++; failures.push(r);
+          failed++;
+          entry.status = "network_error";
+          entry.error = "Network error";
           logLine("no", "X " + shortNum(r.to) + " - network error");
         }
       }
+
+      results.push(entry);
 
       var done = i + 1;
       $("barFill").style.width = (done / total * 100) + "%";
@@ -299,37 +434,83 @@
       if (done < total && !stopRequested) await sleep(gapMs);
     }
 
+    // Mark unsent recipients (stopped early)
+    var stopped = stopRequested && i < total;
+    for (var j = i; j < total; j++) {
+      var ur = recipients[j];
+      results.push({ number: ur.to, name: ur.name, subject: ur.subject, status: "not_sent", error: "Run stopped" });
+      skipped++;
+    }
+
+    var elapsed = Date.now() - startTime;
+    var duration = fmtTime(elapsed);
+
+    // wrap up
     running = false;
     $("sendBtn").disabled = false;
     $("stopBtn").style.display = "none";
-    var stopped = stopRequested && i < total;
     $("dot").className = "dot " + (failed ? "err" : "done");
     $("statusText").textContent = stopped
       ? "Stopped - sent " + sent + ", " + failed + " failed, " + (total - i) + " not sent."
       : "Done - sent " + sent + (failed ? ", " + failed + " failed" : "") + ".";
-    logLine("sys", stopped ? "Stopped at " + i + " of " + total + "." : "Finished. Sent " + sent + " of " + total + ".");
+    logLine("sys", stopped ? "Stopped at " + i + " of " + total + ". (" + duration + ")" : "Finished. Sent " + sent + " of " + total + ". (" + duration + ")");
 
+    // Save to history
+    saveRun({
+      timestamp: Date.now(),
+      total: total,
+      sent: sent,
+      failed: failed,
+      skipped: skipped,
+      duration: duration
+    });
+
+    // Full report download button
     var after = $("after");
-    if (failures.length) {
-      var b = document.createElement("button");
-      b.className = "btn-ghost";
-      b.textContent = "Download " + failures.length + " failed";
-      b.onclick = function() {
-        download("failed-numbers.txt",
-          failures.map(function(f) { return [f.to, f.name, f.subject].filter(Boolean).join(", "); }).join("\n"));
+
+    var reportBtn = document.createElement("button");
+    reportBtn.className = "btn-ghost";
+    reportBtn.textContent = "Download full report (" + total + " rows)";
+    reportBtn.onclick = function() {
+      var csvLines = ["Number,Name,Subject,Status,Error"];
+      for (var k = 0; k < results.length; k++) {
+        var e = results[k];
+        csvLines.push(
+          '"' + (e.number || "") + '",' +
+          '"' + (e.name || "") + '",' +
+          '"' + (e.subject || "") + '",' +
+          e.status + ',' +
+          '"' + (e.error || "") + '"'
+        );
+      }
+      downloadCSV("sms-report-" + new Date().toISOString().slice(0,10) + ".csv", csvLines.join("\n"));
+    };
+    after.appendChild(reportBtn);
+
+    if (failed > 0 || skipped > 0) {
+      var failBtn = document.createElement("button");
+      failBtn.className = "btn-ghost";
+      var failCount = results.filter(function(e) { return e.status !== "sent"; }).length;
+      failBtn.textContent = "Download " + failCount + " failed/skipped";
+      failBtn.onclick = function() {
+        var lines = results
+          .filter(function(e) { return e.status !== "sent"; })
+          .map(function(e) { return [e.number, e.name, e.subject].filter(Boolean).join(", ") + " (" + e.status + (e.error ? ": " + e.error : "") + ")"; });
+        download("failed-numbers.txt", lines.join("\n"));
       };
-      after.appendChild(b);
+      after.appendChild(failBtn);
     }
+
     if (stopped) {
-      var remaining = recipients.slice(i);
-      var b2 = document.createElement("button");
-      b2.className = "btn-ghost";
-      b2.textContent = "Download " + remaining.length + " not sent";
-      b2.onclick = function() {
-        download("remaining-numbers.txt",
-          remaining.map(function(f) { return [f.to, f.name, f.subject].filter(Boolean).join(", "); }).join("\n"));
+      var remaining = results.filter(function(e) { return e.status === "not_sent"; });
+      var remBtn = document.createElement("button");
+      remBtn.className = "btn-ghost";
+      remBtn.textContent = "Download " + remaining.length + " not sent";
+      remBtn.onclick = function() {
+        var lines = remaining.map(function(e) { return [e.number, e.name, e.subject].filter(Boolean).join(", "); });
+        download("remaining-numbers.txt", lines.join("\n"));
       };
-      after.appendChild(b2);
+      after.appendChild(remBtn);
     }
   };
 </script>
