@@ -41,7 +41,7 @@
   }
   select{resize:none; cursor:pointer}
   input:focus,textarea:focus,select:focus{outline:2px solid var(--accent); outline-offset:1px; border-color:var(--accent)}
-  textarea#message{min-height:80px}
+  textarea#message{min-height:220px}
   textarea#recipients{min-height:132px}
   .counter{font-family:var(--mono); font-size:12px; color:var(--muted); float:right; font-weight:400}
   .actions{display:flex; gap:10px; align-items:center; margin-top:4px}
@@ -87,7 +87,7 @@
 <body>
 <div class="wrap">
   <header class="top">
-    <p class="kicker">Wiingy &middot; SMS</p>
+    <p class="kicker">Wiingy - SMS</p>
     <h1>Bulk message sender</h1>
     <p class="sub">Sends one text at a time with a set gap, so you never hit the rate limit.</p>
   </header>
@@ -97,7 +97,7 @@
       <div class="field">
         <label for="password">Access password</label>
         <input id="password" type="password" autocomplete="off" placeholder="the SEND_PASSWORD you set in Vercel" />
-        <p class="hint">Not your Quo key &mdash; a password you choose to lock this page.</p>
+        <p class="hint">Not your Quo key - a password you choose to lock this page.</p>
       </div>
       <div class="field">
         <label for="from">From number <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
@@ -110,16 +110,16 @@
       <div class="field">
         <label for="bucket">Bucket</label>
         <select id="bucket">
-          <option value="">&mdash; select &mdash;</option>
-          <option value="DNS">DNS &ndash; Demo Not Scheduled</option>
-          <option value="DNC">DNC &ndash; Demo Not Completed</option>
-          <option value="DL">DL &ndash; Demo Lost</option>
+          <option value="">-- select --</option>
+          <option value="DNS">DNS - Demo Not Scheduled</option>
+          <option value="DNC">DNC - Demo Not Completed</option>
+          <option value="DL">DL - Demo Lost</option>
         </select>
       </div>
       <div class="field">
         <label for="category">Subject category</label>
         <select id="category">
-          <option value="">&mdash; select &mdash;</option>
+          <option value="">-- select --</option>
           <option value="Math">Math</option>
           <option value="Academics">Academics</option>
         </select>
@@ -135,7 +135,7 @@
     <div class="field">
       <label for="recipients">Recipients <span class="counter" id="recCount">0 valid</span></label>
       <textarea id="recipients" placeholder="+15555550101, Alex, Math&#10;+15555550102, Sam, AP Chemistry&#10;+15555550103, Jordan, Economics"></textarea>
-      <p class="hint">One per line: <code>+number, Name, Subject</code> &mdash; the subject replaces <code>{{subject}}</code> in the message.</p>
+      <p class="hint">One per line: <code>+number, Name, Subject</code> - the subject replaces <code>{{subject}}</code> in the message.</p>
     </div>
 
     <div class="field" style="max-width:220px">
@@ -153,7 +153,7 @@
     <div class="progress" id="progress">
       <div class="bar"><i id="barFill"></i></div>
       <div class="stats">
-        <span class="live"><span class="dot" id="dot"></span><span id="statusText">Sending&hellip;</span></span>
+        <span class="live"><span class="dot" id="dot"></span><span id="statusText">Sending...</span></span>
         <span id="counts">0 / 0</span>
       </div>
       <div class="log" id="log"></div>
@@ -163,121 +163,128 @@
 </div>
 
 <script>
-  const $ = (id) => document.getElementById(id);
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-  const E164 = /^\+[1-9]\d{1,14}$/;
+  var $ = function(id) { return document.getElementById(id); };
+  var sleep = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };
+  var E164 = /^\+[1-9]\d{1,14}$/;
 
-  let running = false, stopRequested = false;
+  var running = false, stopRequested = false;
 
-  // ── Message templates keyed by "BUCKET|CATEGORY" ──
-  const TEMPLATES = {
+  // Message templates keyed by "BUCKET|CATEGORY"
+  var TEMPLATES = {
     "DNS|Math":
-"Hi {{name}}, is Math sorted for this year?\n\
-\n\
-It’s Wiingy here. You inquired about {{subject}} learning a while back and we never got you booked. That one’s on us, and we’d like to put it right.\n\
-\n\
-Math is the one subject where this year builds straight on last year. A small gap in today’s learning quietly becomes the whole problem by later.\n\
-\n\
-Free trial session, live 1 on 1, see if it’s a fit. You can reply YES and we can pick up from there.",
+      "Hi {{name}}, is Math sorted for this year?\n" +
+      "\n" +
+      "It's Wiingy here. You inquired about {{subject}} learning a while back and we never got you booked. That one's on us, and we'd like to put it right.\n" +
+      "\n" +
+      "Math is the one subject where this year builds straight on last year. A small gap in today's learning quietly becomes the whole problem by later.\n" +
+      "\n" +
+      "Free trial session, live 1 on 1, see if it's a fit. You can reply YES and we can pick up from there.",
 
     "DNC|Math":
-"Hi {{name}}, is Math sorted for this year?\n\
-\n\
-It’s Wiingy here. You booked a {{subject}} session with us earlier this year and it never happened. Life gets busy, no problem at all.\n\
-\n\
-Which means your free trial is still sitting there unused. And in math, 1 on 1 live is where you can ask the question you’d never ask in a class of thirty.\n\
-\n\
-Want us to re-book it? You can reply YES and we can pick up from there.",
+      "Hi {{name}}, is Math sorted for this year?\n" +
+      "\n" +
+      "It's Wiingy here. You booked a {{subject}} session with us earlier this year and it never happened. Life gets busy, no problem at all.\n" +
+      "\n" +
+      "Which means your free trial is still sitting there unused. And in math, 1 on 1 live is where you can ask the question you'd never ask in a class of thirty.\n" +
+      "\n" +
+      "Want us to re-book it? You can reply YES and we can pick up from there.",
 
     "DL|Math":
-"Hi {{name}}, is Math sorted for this year?\n\
-\n\
-It’s Wiingy here. We’d start with a trial session & match you with a tutor who’s genuinely worth your time and gets exactly what you’re aiming for. Someone who’s spent years mastering it.\n\
-\n\
-Also a few things have changed since, packages are up to 25% off, you can spread payment across months, and you can help choose the tutor now.\n\
-\n\
-New motive, new topics building on old ones. Reply YES to find your match.",
+      "Hi {{name}}, is Math sorted for this year?\n" +
+      "\n" +
+      "It's Wiingy here. We'd start with a trial session & match you with a tutor who's genuinely worth your time and gets exactly what you're aiming for. Someone who's spent years mastering it.\n" +
+      "\n" +
+      "Also a few things have changed since, packages are up to 25% off, you can spread payment across months, and you can help choose the tutor now.\n" +
+      "\n" +
+      "New motive, new topics building on old ones. Reply YES to find your match.",
 
     "DNS|Academics":
-"Hi {{name}}, Back to school already?\n\
-\n\
-It’s Wiingy here. You asked us about {{subject}} lessons a while back and we never got you booked. That one’s on us, and we’d like to put it right.\n\
-\n\
-The first few weeks of term usually decide how the whole year feels. Let us get you a free trial session before then, 1 on 1 live with a tutor picked around what you actually want.\n\
-\n\
-See if it’s a fit. No commitment. You can reply YES and we can pick up from there.",
+      "Hi {{name}}, Back to school already?\n" +
+      "\n" +
+      "It's Wiingy here. You asked us about {{subject}} lessons a while back and we never got you booked. That one's on us, and we'd like to put it right.\n" +
+      "\n" +
+      "The first few weeks of term usually decide how the whole year feels. Let us get you a free trial session before then, 1 on 1 live with a tutor picked around what you actually want.\n" +
+      "\n" +
+      "See if it's a fit. No commitment. You can reply YES and we can pick up from there.",
 
     "DNC|Academics":
-"Hi {{name}}, Back to school already?\n\
-\n\
-It’s Wiingy here. You booked a {{subject}} session with us earlier this year and it never happened. Life gets busy, no problem at all.\n\
-\n\
-Which means your free trial is still sitting there unused. Choose your own tutor or let us match you. 1 on 1, and you decide how you feel afterwards.\n\
-\n\
-Want us to re-book it? You can reply YES to break the ice.",
+      "Hi {{name}}, Back to school already?\n" +
+      "\n" +
+      "It's Wiingy here. You booked a {{subject}} session with us earlier this year and it never happened. Life gets busy, no problem at all.\n" +
+      "\n" +
+      "Which means your free trial is still sitting there unused. Choose your own tutor or let us match you. 1 on 1, and you decide how you feel afterwards.\n" +
+      "\n" +
+      "Want us to re-book it? You can reply YES to break the ice.",
 
     "DL|Academics":
-"Hi {{name}}, Back to school then?\n\
-\n\
-It’s Wiingy here. You met one of our {{subject}} tutors a while back and didn’t carry on. Completely fair.\n\
-\n\
-A few things have changed since: packages are up to 25% off, you can spread payment across months, and you choose your own tutor now rather than being handed one.\n\
-\n\
-Good moment to pick it back up. You can reply YES and we can continue from there.",
+      "Hi {{name}}, Back to school then?\n" +
+      "\n" +
+      "It's Wiingy here. You met one of our {{subject}} tutors a while back and didn't carry on. Completely fair.\n" +
+      "\n" +
+      "A few things have changed since: packages are up to 25% off, you can spread payment across months, and you choose your own tutor now rather than being handed one.\n" +
+      "\n" +
+      "Good moment to pick it back up. You can reply YES and we can continue from there."
   };
 
-  // ── Auto-fill message when bucket + category change ──
+  // Char + segment counter
+  function updateMsgCount() {
+    var t = $("message").value;
+    var unicode = /[^ -]/.test(t);
+    var per = unicode ? 70 : 160;
+    var seg = t.length === 0 ? 0 : Math.ceil(t.length / per);
+    $("msgCount").textContent = t.length + " chars, " + seg + " segment" + (seg === 1 ? "" : "s");
+  }
+
+  // Auto-fill message when bucket + category change
   function onTemplateChange() {
-    const key = $("bucket").value + "|" + $("category").value;
+    var key = $("bucket").value + "|" + $("category").value;
     if (TEMPLATES[key]) {
       $("message").value = TEMPLATES[key];
-      $("message").dispatchEvent(new Event("input"));
+      updateMsgCount();
     }
   }
   $("bucket").addEventListener("change", onTemplateChange);
   $("category").addEventListener("change", onTemplateChange);
 
-  // ── Live counters ──
-  $("message").addEventListener("input", () => {
-    const t = $("message").value;
-    const unicode = /[^ -]/.test(t);
-    const per = unicode ? 70 : 160;
-    const seg = t.length === 0 ? 0 : Math.ceil(t.length / per);
-    $("msgCount").textContent = `${t.length} chars · ${seg} segment${seg === 1 ? "" : "s"}`;
-  });
+  // Live counters
+  $("message").addEventListener("input", updateMsgCount);
   $("recipients").addEventListener("input", updateRecCount);
 
   function parseRecipients() {
     return $("recipients").value
       .split("\n")
-      .map(l => l.trim())
+      .map(function(l) { return l.trim(); })
       .filter(Boolean)
-      .map(line => {
-        const parts = line.split(",").map(p => p.trim());
-        const to = parts[0] || "";
-        const name = parts[1] || "";
-        const subject = parts[2] || "";
-        return { to, name, subject, valid: E164.test(to) };
+      .map(function(line) {
+        var parts = line.split(",").map(function(p) { return p.trim(); });
+        var to = parts[0] || "";
+        var name = parts[1] || "";
+        var subject = parts[2] || "";
+        return { to: to, name: name, subject: subject, valid: E164.test(to) };
       });
   }
+
   function updateRecCount() {
-    const list = parseRecipients();
-    const bad = list.filter(r => !r.valid).length;
+    var list = parseRecipients();
+    var bad = list.filter(function(r) { return !r.valid; }).length;
     $("recCount").textContent =
-      `${list.length - bad} valid` + (bad ? ` · ${bad} need fixing` : "");
+      (list.length - bad) + " valid" + (bad ? ", " + bad + " need fixing" : "");
   }
 
-  const render = (tpl, r) =>
-    tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => {
+  function render(tpl, r) {
+    return tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, function(match, k) {
       if (k === "name" && r.name) return r.name;
       if (k === "subject" && r.subject) return r.subject;
       return "";
     });
+  }
 
-  const shortNum = (n) => n.length > 6 ? n.slice(0, 5) + "…" + n.slice(-2) : n;
+  function shortNum(n) {
+    return n.length > 6 ? n.slice(0, 5) + "..." + n.slice(-2) : n;
+  }
 
   function logLine(cls, text) {
-    const line = document.createElement("div");
+    var line = document.createElement("div");
     line.className = cls;
     line.textContent = text;
     $("log").appendChild(line);
@@ -285,8 +292,8 @@ Good moment to pick it back up. You can reply YES and we can continue from there
   }
 
   function download(name, text) {
-    const blob = new Blob([text], { type: "text/plain" });
-    const a = document.createElement("a");
+    var blob = new Blob([text], { type: "text/plain" });
+    var a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = name;
     a.click();
@@ -294,33 +301,33 @@ Good moment to pick it back up. You can reply YES and we can continue from there
   }
 
   function fmtTime(ms) {
-    const s = Math.round(ms / 1000);
-    if (s < 60) return `${s}s`;
-    return `${Math.floor(s / 60)}m ${s % 60}s`;
+    var s = Math.round(ms / 1000);
+    if (s < 60) return s + "s";
+    return Math.floor(s / 60) + "m " + (s % 60) + "s";
   }
 
   function showError(text) {
-    const box = $("error");
+    var box = $("error");
     box.textContent = text;
     box.className = "msg err";
   }
   function clearError() { $("error").className = "msg"; }
 
-  $("stopBtn").onclick = () => {
+  $("stopBtn").onclick = function() {
     stopRequested = true;
     $("stopBtn").disabled = true;
-    $("statusText").textContent = "Stopping after this message…";
+    $("statusText").textContent = "Stopping after this message...";
   };
 
-  $("sendBtn").onclick = async () => {
+  $("sendBtn").onclick = async function() {
     if (running) return;
     clearError();
 
-    const password = $("password").value.trim();
-    const from = $("from").value.trim();
-    const message = $("message").value;
-    const gapMs = Math.max(1, parseFloat($("gap").value) || 2) * 1000;
-    const recipients = parseRecipients();
+    var password = $("password").value.trim();
+    var from = $("from").value.trim();
+    var message = $("message").value;
+    var gapMs = Math.max(1, parseFloat($("gap").value) || 2) * 1000;
+    var recipients = parseRecipients();
 
     if (!password) return showError("Enter the access password.");
     if (!message.trim()) return showError("Write a message first.");
@@ -334,53 +341,53 @@ Good moment to pick it back up. You can reply YES and we can continue from there
     $("log").textContent = "";
     $("after").textContent = "";
     $("dot").className = "dot";
-    $("statusText").textContent = "Sending…";
+    $("statusText").textContent = "Sending...";
 
-    const total = recipients.length;
-    let sent = 0, failed = 0;
-    const failures = [];
-    logLine("sys", `Starting — ${total} messages, ${gapMs / 1000}s gap.`);
+    var total = recipients.length;
+    var sent = 0, failed = 0;
+    var failures = [];
+    logLine("sys", "Starting - " + total + " messages, " + (gapMs / 1000) + "s gap.");
 
-    let i = 0;
+    var i = 0;
     for (; i < total; i++) {
       if (stopRequested) break;
-      const r = recipients[i];
+      var r = recipients[i];
 
       if (!r.valid) {
         failed++; failures.push(r);
-        logLine("no", `✕ ${r.to || "(blank)"} — not a valid +number, skipped`);
+        logLine("no", "X " + (r.to || "(blank)") + " - not a valid +number, skipped");
       } else {
         try {
-          const res = await fetch("/api/send-one", {
+          var res = await fetch("/api/send-one", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ password, from, to: r.to, content: render(message, r) }),
+            body: JSON.stringify({ password: password, from: from, to: r.to, content: render(message, r) }),
           });
-          const data = await res.json();
+          var data = await res.json();
           if (res.status === 401) {
-            showError("Wrong access password — nothing more was sent.");
-            logLine("no", "✕ Wrong access password. Stopped.");
+            showError("Wrong access password - nothing more was sent.");
+            logLine("no", "X Wrong access password. Stopped.");
             break;
           }
           if (data.ok) {
             sent++;
-            logLine("ok", `✓ ${shortNum(r.to)}${r.name ? " " + r.name : ""}${r.subject ? " [" + r.subject + "]" : ""}`);
+            logLine("ok", "OK " + shortNum(r.to) + (r.name ? " " + r.name : "") + (r.subject ? " [" + r.subject + "]" : ""));
           } else {
             failed++; failures.push(r);
-            logLine("no", `✕ ${shortNum(r.to)} — ${data.error || "failed"}`);
+            logLine("no", "X " + shortNum(r.to) + " - " + (data.error || "failed"));
           }
         } catch (err) {
           failed++; failures.push(r);
-          logLine("no", `✕ ${shortNum(r.to)} — network error`);
+          logLine("no", "X " + shortNum(r.to) + " - network error");
         }
       }
 
-      const done = i + 1;
+      var done = i + 1;
       $("barFill").style.width = (done / total * 100) + "%";
-      const left = total - done;
-      const eta = left * (gapMs + 700);
+      var left = total - done;
+      var eta = left * (gapMs + 700);
       $("counts").textContent =
-        `${done} / ${total}` + (failed ? `  ·  ${failed} failed` : "") + (left ? `  ·  ~${fmtTime(eta)} left` : "");
+        done + " / " + total + (failed ? "  |  " + failed + " failed" : "") + (left ? "  |  ~" + fmtTime(eta) + " left" : "");
 
       if (done < total && !stopRequested) await sleep(gapMs);
     }
@@ -389,31 +396,35 @@ Good moment to pick it back up. You can reply YES and we can continue from there
     running = false;
     $("sendBtn").disabled = false;
     $("stopBtn").style.display = "none";
-    const stopped = stopRequested && i < total;
+    var stopped = stopRequested && i < total;
     $("dot").className = "dot " + (failed ? "err" : "done");
     $("statusText").textContent = stopped
-      ? `Stopped — sent ${sent}, ${failed} failed, ${total - i} not sent.`
-      : `Done — sent ${sent}${failed ? `, ${failed} failed` : ""}.`;
-    logLine("sys", stopped ? `Stopped at ${i} of ${total}.` : `Finished. Sent ${sent} of ${total}.`);
+      ? "Stopped - sent " + sent + ", " + failed + " failed, " + (total - i) + " not sent."
+      : "Done - sent " + sent + (failed ? ", " + failed + " failed" : "") + ".";
+    logLine("sys", stopped ? "Stopped at " + i + " of " + total + "." : "Finished. Sent " + sent + " of " + total + ".");
 
     // download buttons
-    const after = $("after");
+    var after = $("after");
     if (failures.length) {
-      const b = document.createElement("button");
+      var b = document.createElement("button");
       b.className = "btn-ghost";
-      b.textContent = `Download ${failures.length} failed`;
-      b.onclick = () => download("failed-numbers.txt",
-        failures.map(f => [f.to, f.name, f.subject].filter(Boolean).join(", ")).join("\n"));
+      b.textContent = "Download " + failures.length + " failed";
+      b.onclick = function() {
+        download("failed-numbers.txt",
+          failures.map(function(f) { return [f.to, f.name, f.subject].filter(Boolean).join(", "); }).join("\n"));
+      };
       after.appendChild(b);
     }
     if (stopped) {
-      const remaining = recipients.slice(i);
-      const b = document.createElement("button");
-      b.className = "btn-ghost";
-      b.textContent = `Download ${remaining.length} not sent`;
-      b.onclick = () => download("remaining-numbers.txt",
-        remaining.map(f => [f.to, f.name, f.subject].filter(Boolean).join(", ")).join("\n"));
-      after.appendChild(b);
+      var remaining = recipients.slice(i);
+      var b2 = document.createElement("button");
+      b2.className = "btn-ghost";
+      b2.textContent = "Download " + remaining.length + " not sent";
+      b2.onclick = function() {
+        download("remaining-numbers.txt",
+          remaining.map(function(f) { return [f.to, f.name, f.subject].filter(Boolean).join(", "); }).join("\n"));
+      };
+      after.appendChild(b2);
     }
   };
 </script>
