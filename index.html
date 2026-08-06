@@ -379,7 +379,7 @@
     for (; i < total; i++) {
       if (stopRequested) break;
       var r = recipients[i];
-      var entry = { number: r.to, name: r.name, subject: r.subject, status: "", error: "" };
+      var entry = { number: r.to, name: r.name, subject: r.subject, status: "", error: "", time: "" };
 
       if (!r.valid) {
         skipped++;
@@ -422,6 +422,7 @@
         }
       }
 
+      entry.time = fmtDate(new Date());
       results.push(entry);
 
       var done = i + 1;
@@ -472,14 +473,17 @@
     reportBtn.className = "btn-ghost";
     reportBtn.textContent = "Download full report (" + total + " rows)";
     reportBtn.onclick = function() {
-      var csvLines = ["Number,Name,Subject,Status,Error"];
+      var csvLines = ["Number,Name,Subject,Status,Sent Date/Time,Error,Error Reason"];
       for (var k = 0; k < results.length; k++) {
         var e = results[k];
+        var hasError = e.status !== "sent" ? "Yes" : "No";
         csvLines.push(
           '"' + (e.number || "") + '",' +
           '"' + (e.name || "") + '",' +
           '"' + (e.subject || "") + '",' +
           e.status + ',' +
+          '"' + (e.time || "") + '",' +
+          hasError + ',' +
           '"' + (e.error || "") + '"'
         );
       }
