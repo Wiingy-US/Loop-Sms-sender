@@ -42,6 +42,15 @@ export default async function handler(req, res) {
       try { data = await r.json(); } catch { /* non-JSON */ }
 
       if (r.ok) {
+        const msgStatus = (data?.data?.status ?? "").toLowerCase();
+        if (msgStatus === "failed" || msgStatus === "undelivered") {
+          return res.status(200).json({
+            ok: false,
+            error: `Message ${msgStatus}` + (data?.data?.errorMessage ? `: ${data.data.errorMessage}` : ""),
+            id: data?.data?.id ?? null,
+            status: msgStatus,
+          });
+        }
         return res.status(200).json({ ok: true, id: data?.data?.id ?? null, status: data?.data?.status ?? "queued" });
       }
       // Retry only rate-limit / transient server errors.
