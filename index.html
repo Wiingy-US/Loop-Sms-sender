@@ -17,7 +17,7 @@
     margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
     line-height:1.5; padding:32px 16px; display:flex; justify-content:center;
   }
-  .wrap{width:100%; max-width:620px}
+  .wrap{width:100%; max-width:640px}
   header.top{margin-bottom:20px}
   .kicker{
     font-family:var(--mono); font-size:12px; letter-spacing:.14em; text-transform:uppercase;
@@ -56,6 +56,9 @@
   .btn-ghost:hover{background:#F4F6F8}
   .btn-danger-ghost{background:#fff; color:var(--danger); border-color:var(--line); font-size:12px; padding:6px 12px}
   .btn-danger-ghost:hover{background:var(--danger-weak)}
+  .btn-save{background:var(--accent); color:#fff; font-size:12px; padding:6px 12px}
+  .btn-save:hover{filter:brightness(1.06)}
+  .btn-save:disabled{opacity:.5; cursor:not-allowed}
   .msg{padding:10px 12px; border-radius:9px; font-size:13px; margin-top:4px; display:none}
   .msg.err{display:block; background:var(--danger-weak); color:var(--danger)}
   .progress{margin-top:22px; display:none}
@@ -82,11 +85,11 @@
   .log .sys{color:#8AA0AB}
   .after{margin-top:12px; display:flex; gap:10px; flex-wrap:wrap}
 
-  /* Run history */
   .history{margin-top:24px}
   .history h2{font-size:18px; margin:0 0 12px}
   .history-empty{color:var(--muted); font-size:13px; font-style:italic}
-  .history-table{width:100%; border-collapse:collapse; font-size:13px}
+  .hist-wrap{overflow-x:auto}
+  .history-table{width:100%; border-collapse:collapse; font-size:13px; min-width:580px}
   .history-table th{
     text-align:left; font-weight:600; padding:8px 10px;
     border-bottom:2px solid var(--line); color:var(--muted); font-size:12px;
@@ -97,7 +100,13 @@
   .history-table .num{font-family:var(--mono); text-align:right}
   .history-table .success{color:var(--accent)}
   .history-table .fail{color:var(--danger)}
-  .history-actions{margin-top:10px; display:flex; gap:8px}
+  .history-table .unsaved{background:var(--accent-weak)}
+  .tag-new{
+    font-size:10px; font-weight:600; color:var(--accent); background:var(--accent-weak);
+    padding:1px 5px; border-radius:4px; margin-left:6px; display:inline-block;
+  }
+  .history-actions{margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+  .save-status{font-size:12px; color:var(--muted)}
 </style>
 </head>
 <body>
@@ -161,10 +170,12 @@
 
   <div class="history panel" style="margin-top:24px">
     <h2>Run history</h2>
-    <div id="historyContent"></div>
+    <div id="historyContent"><p class="history-empty">Loading history...</p></div>
     <div class="history-actions" id="historyActions" style="display:none">
-      <button class="btn-ghost" id="exportHistoryBtn" style="font-size:12px;padding:6px 12px">Export all history</button>
-      <button class="btn-danger-ghost" id="clearHistoryBtn">Clear history</button>
+      <button class="btn-save" id="saveRepoBtn" disabled>Save to repo</button>
+      <span class="save-status" id="saveStatus"></span>
+      <button class="btn-ghost" id="exportHistoryBtn" style="font-size:12px;padding:6px 12px">Export CSV</button>
+      <button class="btn-danger-ghost" id="clearHistoryBtn">Clear local</button>
     </div>
   </div>
 </div>
@@ -176,6 +187,9 @@
   var HAS_UNICODE = /[^\x20-\x7E]/;
 
   var running = false, stopRequested = false;
+  var sessionRuns = [];
+  var repoHistory = [];
+  var repoLoaded = false;
 
   $("message").addEventListener("input", function() {
     var t = $("message").value;
@@ -212,6 +226,12 @@
       if (k === "subject" && r.subject) return r.subject;
       return "";
     });
+  }
+
+  function calcSegments(text) {
+    if (!text || text.length === 0) return 0;
+    var per = HAS_UNICODE.test(text) ? 70 : 160;
+    return Math.ceil(text.length / per);
   }
 
   function shortNum(n) {
@@ -271,72 +291,179 @@
   }
   function clearError() { $("error").className = "msg"; }
 
-  // -- Run history (localStorage) --
+  // -- Run history --
   var HISTORY_KEY = "sms_sender_history";
 
-  function getHistory() {
-    try {
-      return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
-    } catch(e) { return []; }
+  function getLocalHistory() {
+    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); }
+    catch(e) { return []; }
   }
 
-  function saveRun(run) {
-    var hist = getHistory();
+  function saveRunLocal(run) {
+    var hist = getLocalHistory();
     hist.unshift(run);
     if (hist.length > 50) hist = hist.slice(0, 50);
     localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
+  }
+
+  function addRun(run) {
+    sessionRuns.unshift(run);
+    saveRunLocal(run);
+    renderHistory();
+  }
+
+  async function loadRepoHistory() {
+    try {
+      var res = await fetch("/api/history-read");
+      var data = await res.json();
+      if (data.ok) {
+        repoHistory = data.rows || [];
+        repoLoaded = true;
+      }
+    } catch(e) { /* repo unavailable, no problem */ }
     renderHistory();
   }
 
   function renderHistory() {
-    var hist = getHistory();
-    var el = $("historyContent");
+    var all = [];
+    var i;
+    for (i = 0; i < sessionRuns.length; i++) {
+      all.push({ run: sessionRuns[i], unsaved: true });
+    }
+    for (i = 0; i < repoHistory.length; i++) {
+      all.push({ run: repoHistory[i], unsaved: false });
+    }
 
-    if (hist.length === 0) {
-      el.innerHTML = '<p class="history-empty">No runs yet. History will appear here after your first send.</p>';
+    var el = $("historyContent");
+    if (all.length === 0) {
+      el.innerHTML = '<p class="history-empty">' +
+        (repoLoaded ? "No runs yet. History will appear here after your first send." : "Loading history...") +
+        '</p>';
       $("historyActions").style.display = "none";
       return;
     }
 
     $("historyActions").style.display = "flex";
-    var html = '<table class="history-table"><thead><tr>' +
-      '<th>Date</th><th class="num">Total</th><th class="num">Sent</th><th class="num">Failed</th><th class="num">Skipped</th><th>Duration</th>' +
+    updateSaveBtn();
+
+    var html = '<div class="hist-wrap"><table class="history-table"><thead><tr>' +
+      '<th>Date</th><th class="num">Total</th><th class="num">Sent</th>' +
+      '<th class="num">Failed</th><th class="num">Skipped</th><th>Duration</th>' +
+      '<th class="num">Segments</th><th class="num">Cost</th>' +
       '</tr></thead><tbody>';
 
-    for (var i = 0; i < hist.length; i++) {
-      var r = hist[i];
-      var d = new Date(r.timestamp);
-      html += '<tr>' +
-        '<td>' + fmtDate(d) + '</td>' +
-        '<td class="num">' + r.total + '</td>' +
-        '<td class="num success">' + r.sent + '</td>' +
-        '<td class="num fail">' + (r.failed || 0) + '</td>' +
-        '<td class="num">' + (r.skipped || 0) + '</td>' +
-        '<td>' + (r.duration || "-") + '</td>' +
+    for (i = 0; i < all.length; i++) {
+      var item = all[i];
+      var row = item.run;
+      var dateStr = "";
+      if (row.timestamp) {
+        dateStr = fmtDate(new Date(row.timestamp));
+      } else if (row.date) {
+        dateStr = fmtDate(new Date(row.date));
+      }
+      var segs = row.segments || 0;
+      var cost = row.cost !== undefined && row.cost !== "" ? row.cost : "-";
+      if (typeof cost === "number") cost = cost.toFixed(2);
+
+      html += '<tr' + (item.unsaved ? ' class="unsaved"' : '') + '>' +
+        '<td>' + dateStr + (item.unsaved ? '<span class="tag-new">new</span>' : '') + '</td>' +
+        '<td class="num">' + (row.total || 0) + '</td>' +
+        '<td class="num success">' + (row.sent || 0) + '</td>' +
+        '<td class="num fail">' + (row.failed || 0) + '</td>' +
+        '<td class="num">' + (row.skipped || 0) + '</td>' +
+        '<td>' + (row.duration || "-") + '</td>' +
+        '<td class="num">' + segs + '</td>' +
+        '<td class="num">' + (cost === "-" ? "-" : "$" + cost) + '</td>' +
         '</tr>';
     }
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     el.innerHTML = html;
   }
 
+  function updateSaveBtn() {
+    var btn = $("saveRepoBtn");
+    if (sessionRuns.length > 0) {
+      btn.textContent = "Save " + sessionRuns.length + " run" + (sessionRuns.length > 1 ? "s" : "") + " to repo";
+      btn.disabled = false;
+    } else {
+      btn.textContent = "Saved";
+      btn.disabled = true;
+    }
+  }
+
+  $("saveRepoBtn").onclick = async function() {
+    var password = $("password").value.trim();
+    if (!password) { showError("Enter the access password to save history."); return; }
+    if (sessionRuns.length === 0) return;
+
+    var btn = $("saveRepoBtn");
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+    $("saveStatus").textContent = "";
+
+    var rows = [];
+    for (var i = sessionRuns.length - 1; i >= 0; i--) {
+      var run = sessionRuns[i];
+      rows.push({
+        date: new Date(run.timestamp).toISOString(),
+        total: run.total,
+        sent: run.sent,
+        failed: run.failed,
+        skipped: run.skipped,
+        duration: run.duration,
+        segments: run.segments || 0,
+        cost: typeof run.cost === "number" ? run.cost.toFixed(2) : (run.cost || "0.00")
+      });
+    }
+
+    try {
+      var res = await fetch("/api/history-save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: password, rows: rows })
+      });
+      var data = await res.json();
+      if (data.ok) {
+        for (var j = 0; j < sessionRuns.length; j++) {
+          repoHistory.unshift(sessionRuns[j]);
+        }
+        sessionRuns = [];
+        renderHistory();
+        $("saveStatus").textContent = "Saved!";
+        setTimeout(function() { $("saveStatus").textContent = ""; }, 4000);
+      } else {
+        $("saveStatus").textContent = "Error: " + (data.error || "Unknown");
+        btn.disabled = false;
+        updateSaveBtn();
+      }
+    } catch(e) {
+      $("saveStatus").textContent = "Network error";
+      btn.disabled = false;
+      updateSaveBtn();
+    }
+  };
+
   $("clearHistoryBtn").onclick = function() {
-    if (confirm("Clear all run history?")) {
+    if (confirm("Clear local history? Repo history is not affected.")) {
       localStorage.removeItem(HISTORY_KEY);
+      sessionRuns = [];
       renderHistory();
     }
   };
 
   $("exportHistoryBtn").onclick = function() {
-    var hist = getHistory();
-    var lines = ["Date,Total,Sent,Failed,Skipped,Duration"];
-    for (var i = 0; i < hist.length; i++) {
-      var r = hist[i];
-      lines.push(fmtDate(new Date(r.timestamp)) + "," + r.total + "," + r.sent + "," + (r.failed||0) + "," + (r.skipped||0) + "," + (r.duration||""));
+    var all = sessionRuns.concat(repoHistory);
+    var lines = ["Date,Total,Sent,Failed,Skipped,Duration,Segments,Cost"];
+    for (var i = 0; i < all.length; i++) {
+      var r = all[i];
+      var d = r.timestamp ? new Date(r.timestamp).toISOString() : (r.date || "");
+      var cost = r.cost !== undefined ? (typeof r.cost === "number" ? r.cost.toFixed(2) : r.cost) : "0.00";
+      lines.push(d + "," + (r.total||0) + "," + (r.sent||0) + "," + (r.failed||0) + "," + (r.skipped||0) + "," + (r.duration||"") + "," + (r.segments||0) + "," + cost);
     }
     downloadCSV("sms-run-history.csv", lines.join("\n"));
   };
 
-  renderHistory();
+  loadRepoHistory();
 
   // -- Send logic --
   $("stopBtn").onclick = function() {
@@ -370,7 +497,7 @@
     $("statusText").textContent = "Sending...";
 
     var total = recipients.length;
-    var sent = 0, failed = 0, skipped = 0;
+    var sent = 0, failed = 0, skipped = 0, runSegments = 0;
     var results = [];
     var startTime = Date.now();
     logLine("sys", "Starting - " + total + " messages, " + (gapMs / 1000) + "s gap.");
@@ -387,11 +514,12 @@
         entry.error = "Not a valid E.164 number";
         logLine("no", "X " + (r.to || "(blank)") + " - not a valid +number, skipped");
       } else {
+        var rendered = render(message, r);
         try {
           var res = await fetch("/api/send-one", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ password: password, from: from, to: r.to, content: render(message, r) }),
+            body: JSON.stringify({ password: password, from: from, to: r.to, content: rendered }),
           });
           var data = await res.json();
           if (res.status === 401) {
@@ -406,6 +534,7 @@
           }
           if (data.ok) {
             sent++;
+            runSegments += calcSegments(rendered);
             entry.status = "sent";
             logLine("ok", "OK " + shortNum(r.to) + (r.name ? " " + r.name : "") + (r.subject ? " [" + r.subject + "]" : ""));
           } else {
@@ -435,7 +564,6 @@
       if (done < total && !stopRequested) await sleep(gapMs);
     }
 
-    // Mark unsent recipients (stopped early)
     var stopped = stopRequested && i < total;
     for (var j = i; j < total; j++) {
       var ur = recipients[j];
@@ -445,38 +573,41 @@
 
     var elapsed = Date.now() - startTime;
     var duration = fmtTime(elapsed);
+    var runCost = parseFloat((runSegments * 0.01).toFixed(2));
 
-    // wrap up
     running = false;
     $("sendBtn").disabled = false;
     $("stopBtn").style.display = "none";
     $("dot").className = "dot " + (failed ? "err" : "done");
     $("statusText").textContent = stopped
       ? "Stopped - sent " + sent + ", " + failed + " failed, " + (total - i) + " not sent."
-      : "Done - sent " + sent + (failed ? ", " + failed + " failed" : "") + ".";
-    logLine("sys", stopped ? "Stopped at " + i + " of " + total + ". (" + duration + ")" : "Finished. Sent " + sent + " of " + total + ". (" + duration + ")");
+      : "Done - sent " + sent + (failed ? ", " + failed + " failed" : "") + ". " + runSegments + " seg, $" + runCost.toFixed(2) + ".";
+    logLine("sys", stopped
+      ? "Stopped at " + i + " of " + total + ". (" + duration + ")"
+      : "Finished. Sent " + sent + " of " + total + ". " + runSegments + " segments = $" + runCost.toFixed(2) + ". (" + duration + ")");
 
-    // Save to history
-    saveRun({
+    addRun({
       timestamp: Date.now(),
       total: total,
       sent: sent,
       failed: failed,
       skipped: skipped,
-      duration: duration
+      duration: duration,
+      segments: runSegments,
+      cost: runCost
     });
 
-    // Full report download button
     var after = $("after");
 
     var reportBtn = document.createElement("button");
     reportBtn.className = "btn-ghost";
     reportBtn.textContent = "Download full report (" + total + " rows)";
     reportBtn.onclick = function() {
-      var csvLines = ["Number,Name,Subject,Status,Sent Date/Time,Error,Error Reason"];
+      var csvLines = ["Number,Name,Subject,Status,Sent Date/Time,Error,Error Reason,Segments"];
       for (var k = 0; k < results.length; k++) {
         var e = results[k];
         var hasError = e.status !== "sent" ? "Yes" : "No";
+        var msgSegs = e.status === "sent" ? calcSegments(render(message, { name: e.name, subject: e.subject })) : 0;
         csvLines.push(
           '"' + (e.number || "") + '",' +
           '"' + (e.name || "") + '",' +
@@ -484,7 +615,8 @@
           e.status + ',' +
           '"' + (e.time || "") + '",' +
           hasError + ',' +
-          '"' + (e.error || "") + '"'
+          '"' + (e.error || "") + '",' +
+          msgSegs
         );
       }
       downloadCSV("sms-report-" + new Date().toISOString().slice(0,10) + ".csv", csvLines.join("\n"));
