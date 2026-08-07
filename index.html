@@ -3,28 +3,82 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>SMS sender</title>
+<title>Wiingy SMS Sender</title>
+<script>(function(){var t=localStorage.getItem("sms_theme");if(t==="dark")document.documentElement.setAttribute("data-theme","dark");})()</script>
 <style>
   :root{
     --bg:#EEF1F4; --panel:#FFFFFF; --ink:#1E2A32; --muted:#64727C;
     --line:#DCE2E8; --accent:#10725A; --accent-weak:#E3F1EC;
     --danger:#B23A2E; --danger-weak:#F7E7E4;
+    --input-bg:#FBFCFD; --log-bg:#0F1A20; --log-ink:#CBD8DF;
+    --sb:#0C6B55; --sb-ink:#fff; --sb-muted:rgba(255,255,255,.6);
+    --sb-hover:rgba(255,255,255,.1); --sb-active:rgba(255,255,255,.17);
+    --btn-ghost-bg:#fff; --btn-ghost-hover:#F4F6F8;
     --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
     --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   }
-  *{box-sizing:border-box}
-  body{
-    margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
-    line-height:1.5; padding:32px 16px; display:flex; justify-content:center;
+  [data-theme="dark"]{
+    --bg:#111318; --panel:#1A1D27; --ink:#D8DEE9; --muted:#7B8794;
+    --line:#2C3240; --accent:#34D399; --accent-weak:#162E26;
+    --danger:#EF9A8F; --danger-weak:#3D2424;
+    --input-bg:#22252F; --log-bg:#0C0F16; --log-ink:#CBD8DF;
+    --sb:#0C0F16; --sb-ink:#D8DEE9; --sb-muted:rgba(216,222,233,.5);
+    --sb-hover:rgba(255,255,255,.06); --sb-active:rgba(255,255,255,.1);
+    --btn-ghost-bg:#22252F; --btn-ghost-hover:#2C3240;
   }
-  .wrap{width:100%; max-width:640px}
-  header.top{margin-bottom:20px}
-  .kicker{
-    font-family:var(--mono); font-size:12px; letter-spacing:.14em; text-transform:uppercase;
-    color:var(--accent); margin:0 0 6px;
+
+  *{box-sizing:border-box; margin:0}
+  body{font-family:var(--sans); line-height:1.5; background:var(--bg); color:var(--ink)}
+
+  /* Layout */
+  .app{display:flex; min-height:100vh}
+
+  /* Sidebar */
+  .sidebar{
+    width:210px; background:var(--sb); color:var(--sb-ink);
+    padding:28px 14px 20px; display:flex; flex-direction:column; flex-shrink:0;
+    border-right:1px solid rgba(255,255,255,.06);
   }
-  h1{font-size:26px; margin:0 0 4px; letter-spacing:-.01em}
-  .sub{color:var(--muted); margin:0; font-size:14px}
+  .brand-mark{
+    width:38px; height:38px; border-radius:10px; background:rgba(255,255,255,.14);
+    display:flex; align-items:center; justify-content:center;
+    font-size:18px; font-weight:800; font-family:var(--sans); margin-bottom:6px;
+  }
+  .brand-text{font-size:20px; font-weight:700; letter-spacing:-.02em; line-height:1}
+  .brand-sub{
+    font-size:11px; text-transform:uppercase; letter-spacing:.12em;
+    color:var(--sb-muted); margin:4px 0 0;
+  }
+  .sidebar nav{display:flex; flex-direction:column; gap:2px; margin-top:28px}
+  .nav-item{
+    padding:9px 12px; border-radius:8px; font-size:13px; font-weight:500;
+    cursor:pointer; color:var(--sb-muted); border:none; background:none;
+    text-align:left; font-family:var(--sans); transition:background .15s;
+  }
+  .nav-item:hover{background:var(--sb-hover); color:var(--sb-ink)}
+  .nav-item.active{background:var(--sb-active); color:var(--sb-ink); font-weight:600}
+  .nav-badge{
+    font-size:10px; font-weight:700; background:var(--accent); color:#fff;
+    padding:0 5px; border-radius:8px; margin-left:6px; line-height:16px; display:inline-block;
+  }
+  .spacer{flex:1}
+  .theme-toggle{
+    padding:8px 12px; border-radius:8px; font-size:12px; font-weight:500;
+    cursor:pointer; color:var(--sb-muted); border:none;
+    background:var(--sb-hover); text-align:left; font-family:var(--sans);
+    transition:background .15s;
+  }
+  .theme-toggle:hover{background:var(--sb-active); color:var(--sb-ink)}
+
+  /* Main */
+  .main{flex:1; padding:36px 32px; overflow-y:auto}
+  .main-inner{max-width:640px; margin:0 auto}
+  .page-title{font-size:24px; font-weight:700; letter-spacing:-.01em; margin-bottom:4px}
+  .page-sub{color:var(--muted); font-size:14px; margin-bottom:20px}
+  .tab-pane{display:none}
+  .tab-pane.active{display:block}
+
+  /* Panel & form */
   .panel{
     background:var(--panel); border:1px solid var(--line); border-radius:14px;
     padding:22px; box-shadow:0 1px 2px rgba(20,40,55,.04),0 8px 24px rgba(20,40,55,.05);
@@ -36,31 +90,37 @@
   .row .field{flex:1; min-width:180px}
   input,textarea{
     width:100%; font-family:var(--mono); font-size:14px; color:var(--ink);
-    background:#FBFCFD; border:1px solid var(--line); border-radius:9px;
+    background:var(--input-bg); border:1px solid var(--line); border-radius:9px;
     padding:10px 12px; resize:vertical;
   }
   input:focus,textarea:focus{outline:2px solid var(--accent); outline-offset:1px; border-color:var(--accent)}
   textarea#message{min-height:120px}
   textarea#recipients{min-height:132px}
   .counter{font-family:var(--mono); font-size:12px; color:var(--muted); float:right; font-weight:400}
+
+  /* Buttons */
   .actions{display:flex; gap:10px; align-items:center; margin-top:4px}
   button{
     font-family:var(--sans); font-size:14px; font-weight:600; border-radius:9px;
     padding:11px 18px; cursor:pointer; border:1px solid transparent;
   }
   .btn-send{background:var(--accent); color:#fff}
-  .btn-send:hover{filter:brightness(1.06)}
-  .btn-send:disabled{opacity:.5; cursor:not-allowed}
-  .btn-stop{background:#fff; color:var(--danger); border-color:var(--danger)}
-  .btn-ghost{background:#fff; color:var(--ink); border-color:var(--line)}
-  .btn-ghost:hover{background:#F4F6F8}
-  .btn-danger-ghost{background:#fff; color:var(--danger); border-color:var(--line); font-size:12px; padding:6px 12px}
+  .btn-send:hover{filter:brightness(1.08)}
+  .btn-send:disabled{opacity:.45; cursor:not-allowed; filter:none}
+  .btn-stop{background:var(--panel); color:var(--danger); border-color:var(--danger)}
+  .btn-ghost{background:var(--btn-ghost-bg); color:var(--ink); border-color:var(--line)}
+  .btn-ghost:hover{background:var(--btn-ghost-hover)}
+  .btn-danger-ghost{background:var(--btn-ghost-bg); color:var(--danger); border-color:var(--line); font-size:12px; padding:6px 12px}
   .btn-danger-ghost:hover{background:var(--danger-weak)}
   .btn-save{background:var(--accent); color:#fff; font-size:12px; padding:6px 12px}
-  .btn-save:hover{filter:brightness(1.06)}
-  .btn-save:disabled{opacity:.5; cursor:not-allowed}
+  .btn-save:hover{filter:brightness(1.08)}
+  .btn-save:disabled{opacity:.45; cursor:not-allowed; filter:none}
+
+  /* Status messages */
   .msg{padding:10px 12px; border-radius:9px; font-size:13px; margin-top:4px; display:none}
   .msg.err{display:block; background:var(--danger-weak); color:var(--danger)}
+
+  /* Progress */
   .progress{margin-top:22px; display:none}
   .progress.show{display:block}
   .bar{height:8px; background:var(--line); border-radius:99px; overflow:hidden}
@@ -74,10 +134,9 @@
   .dot.done{background:var(--muted); animation:none}
   .dot.err{background:var(--danger); animation:none}
   @keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
-  @media (prefers-reduced-motion:reduce){.dot{animation:none} .bar>i{transition:none}}
-  .fail-count{color:var(--danger)}
+  @media(prefers-reduced-motion:reduce){.dot{animation:none} .bar>i{transition:none}}
   .log{
-    font-family:var(--mono); font-size:12.5px; background:#0F1A20; color:#CBD8DF;
+    font-family:var(--mono); font-size:12.5px; background:var(--log-bg); color:var(--log-ink);
     border-radius:10px; padding:12px 14px; max-height:280px; overflow:auto; white-space:pre-wrap;
   }
   .log .ok{color:#7FD1B0}
@@ -85,15 +144,14 @@
   .log .sys{color:#8AA0AB}
   .after{margin-top:12px; display:flex; gap:10px; flex-wrap:wrap}
 
-  .history{margin-top:24px}
-  .history h2{font-size:18px; margin:0 0 12px}
+  /* History */
   .history-empty{color:var(--muted); font-size:13px; font-style:italic}
   .hist-wrap{overflow-x:auto}
   .history-table{width:100%; border-collapse:collapse; font-size:13px; min-width:580px}
   .history-table th{
     text-align:left; font-weight:600; padding:8px 10px;
-    border-bottom:2px solid var(--line); color:var(--muted); font-size:12px;
-    text-transform:uppercase; letter-spacing:.05em;
+    border-bottom:2px solid var(--line); color:var(--muted); font-size:11px;
+    text-transform:uppercase; letter-spacing:.06em;
   }
   .history-table td{padding:8px 10px; border-bottom:1px solid var(--line)}
   .history-table tr:last-child td{border-bottom:none}
@@ -105,79 +163,119 @@
     font-size:10px; font-weight:600; color:var(--accent); background:var(--accent-weak);
     padding:1px 5px; border-radius:4px; margin-left:6px; display:inline-block;
   }
-  .history-actions{margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+  .history-actions{margin-top:14px; display:flex; gap:8px; flex-wrap:wrap; align-items:center}
   .save-status{font-size:12px; color:var(--muted)}
+
+  /* Responsive */
+  @media(max-width:768px){
+    .app{flex-direction:column}
+    .sidebar{
+      width:100%; flex-direction:row; align-items:center;
+      padding:12px 16px; gap:6px; border-right:none; border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    .brand-mark{display:none}
+    .brand-text{font-size:17px; margin-right:4px}
+    .brand-sub{display:none}
+    .sidebar nav{flex-direction:row; margin-top:0; gap:2px}
+    .nav-item{padding:7px 10px; font-size:12px}
+    .spacer{flex:1}
+    .theme-toggle{padding:6px 10px; font-size:11px}
+    .main{padding:20px 16px}
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header class="top">
-    <p class="kicker">Quo - SMS</p>
-    <h1>Bulk message sender</h1>
-    <p class="sub">Sends one text at a time with a set gap, so you never hit the rate limit.</p>
-  </header>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand-mark">W</div>
+    <div class="brand-text">Wiingy</div>
+    <div class="brand-sub">SMS Sender</div>
+    <nav>
+      <button class="nav-item active" data-tab="send">Send Messages</button>
+      <button class="nav-item" data-tab="history" id="historyNav">Run History</button>
+    </nav>
+    <div class="spacer"></div>
+    <button class="theme-toggle" id="themeBtn">Dark mode</button>
+  </aside>
 
-  <div class="panel">
-    <div class="row">
-      <div class="field">
-        <label for="password">Access password</label>
-        <input id="password" type="password" autocomplete="off" placeholder="the SEND_PASSWORD you set in Vercel" />
-        <p class="hint">Not your Quo key - a password you choose to lock this page.</p>
-      </div>
-      <div class="field">
-        <label for="from">From number <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
-        <input id="from" type="text" autocomplete="off" placeholder="+15555550100" />
-        <p class="hint">Blank uses the default set in Vercel.</p>
-      </div>
-    </div>
+  <main class="main">
+    <div class="main-inner">
 
-    <div class="field">
-      <label for="message">Message <span class="counter" id="msgCount">0 chars</span></label>
-      <textarea id="message" placeholder="Hi {{name}}, quick reminder about your {{subject}} session tomorrow."></textarea>
-      <p class="hint">Use <code>{{name}}</code> for the person's name and <code>{{subject}}</code> for their subject.</p>
-    </div>
+      <!-- SEND TAB -->
+      <div id="tab-send" class="tab-pane active">
+        <h1 class="page-title">Send messages</h1>
+        <p class="page-sub">One text at a time with a configurable gap to stay under rate limits.</p>
 
-    <div class="field">
-      <label for="recipients">Recipients <span class="counter" id="recCount">0 valid</span></label>
-      <textarea id="recipients" placeholder="+15555550101, Alex, Math
+        <div class="panel">
+          <div class="row">
+            <div class="field">
+              <label for="password">Access password</label>
+              <input id="password" type="password" autocomplete="off" placeholder="your SEND_PASSWORD" />
+              <p class="hint">The password you set in Vercel to lock this page.</p>
+            </div>
+            <div class="field">
+              <label for="from">From number <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+              <input id="from" type="text" autocomplete="off" placeholder="+15555550100" />
+              <p class="hint">Blank uses the default set in Vercel.</p>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="message">Message <span class="counter" id="msgCount">0 chars</span></label>
+            <textarea id="message" placeholder="Hi {{name}}, quick reminder about your {{subject}} session tomorrow."></textarea>
+            <p class="hint">Use <code>{{name}}</code> and <code>{{subject}}</code> as variables.</p>
+          </div>
+
+          <div class="field">
+            <label for="recipients">Recipients <span class="counter" id="recCount">0 valid</span></label>
+            <textarea id="recipients" placeholder="+15555550101, Alex, Math
 +15555550102, Sam, AP Chemistry
 +15555550103, Jordan, Economics"></textarea>
-      <p class="hint">One per line: <code>+number, Name, Subject</code></p>
-    </div>
+            <p class="hint">One per line: <code>+number, Name, Subject</code></p>
+          </div>
 
-    <div class="field" style="max-width:220px">
-      <label for="gap">Gap between messages</label>
-      <input id="gap" type="number" value="2" min="1" step="0.5" />
-      <p class="hint">Seconds. Default 2.</p>
-    </div>
+          <div class="field" style="max-width:220px">
+            <label for="gap">Gap between messages</label>
+            <input id="gap" type="number" value="2" min="1" step="0.5" />
+            <p class="hint">Seconds. Default 2.</p>
+          </div>
 
-    <div class="actions">
-      <button class="btn-send" id="sendBtn">Send messages</button>
-      <button class="btn-stop" id="stopBtn" style="display:none">Stop</button>
-    </div>
-    <div class="msg" id="error"></div>
+          <div class="actions">
+            <button class="btn-send" id="sendBtn">Send messages</button>
+            <button class="btn-stop" id="stopBtn" style="display:none">Stop</button>
+          </div>
+          <div class="msg" id="error"></div>
 
-    <div class="progress" id="progress">
-      <div class="bar"><i id="barFill"></i></div>
-      <div class="stats">
-        <span class="live"><span class="dot" id="dot"></span><span id="statusText">Sending...</span></span>
-        <span id="counts">0 / 0</span>
+          <div class="progress" id="progress">
+            <div class="bar"><i id="barFill"></i></div>
+            <div class="stats">
+              <span class="live"><span class="dot" id="dot"></span><span id="statusText">Sending...</span></span>
+              <span id="counts">0 / 0</span>
+            </div>
+            <div class="log" id="log"></div>
+            <div class="after" id="after"></div>
+          </div>
+        </div>
       </div>
-      <div class="log" id="log"></div>
-      <div class="after" id="after"></div>
-    </div>
-  </div>
 
-  <div class="history panel" style="margin-top:24px">
-    <h2>Run history</h2>
-    <div id="historyContent"><p class="history-empty">Loading history...</p></div>
-    <div class="history-actions" id="historyActions" style="display:none">
-      <button class="btn-save" id="saveRepoBtn" disabled>Save to repo</button>
-      <span class="save-status" id="saveStatus"></span>
-      <button class="btn-ghost" id="exportHistoryBtn" style="font-size:12px;padding:6px 12px">Export CSV</button>
-      <button class="btn-danger-ghost" id="clearHistoryBtn">Clear local</button>
+      <!-- HISTORY TAB -->
+      <div id="tab-history" class="tab-pane">
+        <h1 class="page-title">Run history</h1>
+        <p class="page-sub">Past send runs loaded from the repo. New runs appear after each send.</p>
+
+        <div class="panel">
+          <div id="historyContent"><p class="history-empty">Loading history...</p></div>
+          <div class="history-actions" id="historyActions" style="display:none">
+            <button class="btn-save" id="saveRepoBtn" disabled>Save to repo</button>
+            <span class="save-status" id="saveStatus"></span>
+            <button class="btn-ghost" id="exportHistoryBtn" style="font-size:12px;padding:6px 12px">Export CSV</button>
+            <button class="btn-danger-ghost" id="clearHistoryBtn">Clear local</button>
+          </div>
+        </div>
+      </div>
+
     </div>
-  </div>
+  </main>
 </div>
 
 <script>
@@ -191,6 +289,44 @@
   var repoHistory = [];
   var repoLoaded = false;
 
+  // -- Theme --
+  (function() {
+    var saved = localStorage.getItem("sms_theme");
+    if (saved === "dark") $("themeBtn").textContent = "Light mode";
+  })();
+
+  $("themeBtn").onclick = function() {
+    var html = document.documentElement;
+    var isDark = html.getAttribute("data-theme") === "dark";
+    if (isDark) {
+      html.removeAttribute("data-theme");
+      localStorage.setItem("sms_theme", "light");
+      $("themeBtn").textContent = "Dark mode";
+    } else {
+      html.setAttribute("data-theme", "dark");
+      localStorage.setItem("sms_theme", "dark");
+      $("themeBtn").textContent = "Light mode";
+    }
+  };
+
+  // -- Tabs --
+  function switchTab(tab) {
+    var panes = document.querySelectorAll(".tab-pane");
+    for (var p = 0; p < panes.length; p++) panes[p].classList.remove("active");
+    var items = document.querySelectorAll(".nav-item");
+    for (var n = 0; n < items.length; n++) items[n].classList.remove("active");
+    document.getElementById("tab-" + tab).classList.add("active");
+    document.querySelector("[data-tab='" + tab + "']").classList.add("active");
+  }
+
+  var navItems = document.querySelectorAll(".nav-item");
+  for (var ni = 0; ni < navItems.length; ni++) {
+    navItems[ni].addEventListener("click", function() {
+      switchTab(this.getAttribute("data-tab"));
+    });
+  }
+
+  // -- Message & recipient counters --
   $("message").addEventListener("input", function() {
     var t = $("message").value;
     var per = HAS_UNICODE.test(t) ? 70 : 160;
@@ -312,6 +448,16 @@
     renderHistory();
   }
 
+  function updateHistoryBadge() {
+    var nav = $("historyNav");
+    var base = "Run History";
+    if (sessionRuns.length > 0) {
+      nav.innerHTML = base + '<span class="nav-badge">' + sessionRuns.length + '</span>';
+    } else {
+      nav.textContent = base;
+    }
+  }
+
   async function loadRepoHistory() {
     try {
       var res = await fetch("/api/history-read");
@@ -320,7 +466,7 @@
         repoHistory = data.rows || [];
         repoLoaded = true;
       }
-    } catch(e) { /* repo unavailable, no problem */ }
+    } catch(e) {}
     renderHistory();
   }
 
@@ -334,7 +480,9 @@
       all.push({ run: repoHistory[i], unsaved: false });
     }
 
+    updateHistoryBadge();
     var el = $("historyContent");
+
     if (all.length === 0) {
       el.innerHTML = '<p class="history-empty">' +
         (repoLoaded ? "No runs yet. History will appear here after your first send." : "Loading history...") +
@@ -393,7 +541,11 @@
 
   $("saveRepoBtn").onclick = async function() {
     var password = $("password").value.trim();
-    if (!password) { showError("Enter the access password to save history."); return; }
+    if (!password) {
+      switchTab("send");
+      showError("Enter the access password to save history.");
+      return;
+    }
     if (sessionRuns.length === 0) return;
 
     var btn = $("saveRepoBtn");
