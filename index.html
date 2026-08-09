@@ -619,7 +619,7 @@
   }
 
   $("saveRepoBtn").onclick = async function() {
-    var password = $("password").value.trim();
+    var password = $("password").value.trim() || $("bulkPassword").value.trim();
     if (!password) {
       switchTab("send");
       showError("Enter the access password to save history.");
