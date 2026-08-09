@@ -302,7 +302,7 @@
             <div class="drop-zone" id="dropZone">
               <input type="file" id="csvFile" accept=".csv" style="display:none" />
               <p>Drop CSV here or <a href="#" id="browseLink">browse</a></p>
-              <p class="hint">Columns: date | Bucket | Number | Name | Subject | Sub Bucket | Final Column | Message Format</p>
+              <p class="hint">Columns: date | Bucket | Number | Name | Message Bucket | Sub Bucket | Final Column | Message Format</p>
             </div>
           </div>
 
@@ -942,7 +942,7 @@
         bucket: (cols[1] || "").trim(),
         number: num,
         name: (cols[3] || "").trim(),
-        subject: (cols[4] || "").trim(),
+        msgBucket: (cols[4] || "").trim(),
         subBucket: (cols[5] || "").trim(),
         finalCol: (cols[6] || "").trim(),
         message: (cols[7] || "").trim(),
@@ -966,11 +966,11 @@
 
   function renderPreview() {
     var limit = Math.min(bulkRows.length, 5);
-    var html = '<thead><tr><th>#</th><th>Bucket</th><th>Number</th><th>Name</th><th>Subject</th><th>Sub Bucket</th><th>Message (preview)</th></tr></thead><tbody>';
+    var html = '<thead><tr><th>#</th><th>Bucket</th><th>Number</th><th>Name</th><th>Msg Bucket</th><th>Sub Bucket</th><th>Message (preview)</th></tr></thead><tbody>';
     for (var i = 0; i < limit; i++) {
       var r = bulkRows[i];
       var msgPreview = r.message.length > 60 ? r.message.substring(0, 60) + "..." : r.message;
-      html += '<tr><td>' + (i + 1) + '</td><td>' + esc(r.bucket) + '</td><td>' + esc(r.number) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.subject) + '</td><td>' + esc(r.subBucket) + '</td><td>' + esc(msgPreview) + '</td></tr>';
+      html += '<tr><td>' + (i + 1) + '</td><td>' + esc(r.bucket) + '</td><td>' + esc(r.number) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.msgBucket) + '</td><td>' + esc(r.subBucket) + '</td><td>' + esc(msgPreview) + '</td></tr>';
     }
     html += '</tbody>';
     $("previewTable").innerHTML = html;
@@ -1103,7 +1103,7 @@
             r.error = "no";
             r.errorSent = "";
             r.sentTime = fmtDate(new Date());
-            bulkLogLine("ok", "OK " + shortNum(r.number) + (r.name ? " " + r.name : "") + (r.subject ? " [" + r.subject + "]" : ""));
+            bulkLogLine("ok", "OK " + shortNum(r.number) + (r.name ? " " + r.name : "") + (r.msgBucket ? " [" + r.msgBucket + "]" : ""));
           } else {
             failed++;
             r.error = "yes";
@@ -1169,7 +1169,7 @@
     dlBtn.className = "btn-send";
     dlBtn.textContent = "Download results CSV (" + total + " rows)";
     dlBtn.onclick = function() {
-      var lines = ["date,Bucket,Number,Name,Subject,Sub Bucket,Final Column,Message Format,Error,Error Sent,Sent Time"];
+      var lines = ["date,Bucket,Number,Name,Message Bucket,Sub Bucket,Final Column,Message Format,Error,Error Sent,Sent Time"];
       for (var k = 0; k < bulkRows.length; k++) {
         var br = bulkRows[k];
         lines.push(
@@ -1177,7 +1177,7 @@
           csvField(br.bucket) + ',' +
           csvField(br.number) + ',' +
           csvField(br.name) + ',' +
-          csvField(br.subject) + ',' +
+          csvField(br.msgBucket) + ',' +
           csvField(br.subBucket) + ',' +
           csvField(br.finalCol) + ',' +
           csvField(br.message) + ',' +
@@ -1196,11 +1196,11 @@
       var failCount = bulkRows.filter(function(br) { return br.error === "yes"; }).length;
       failBtn.textContent = "Download " + failCount + " failed/skipped";
       failBtn.onclick = function() {
-        var lines = ["Number,Name,Subject,Error Reason"];
+        var lines = ["Number,Name,Message Bucket,Error Reason"];
         for (var k = 0; k < bulkRows.length; k++) {
           var br = bulkRows[k];
           if (br.error === "yes") {
-            lines.push(csvField(br.number) + ',' + csvField(br.name) + ',' + csvField(br.subject) + ',' + csvField(br.errorSent));
+            lines.push(csvField(br.number) + ',' + csvField(br.name) + ',' + csvField(br.msgBucket) + ',' + csvField(br.errorSent));
           }
         }
         downloadCSV("bulk-failed-" + new Date().toISOString().slice(0, 10) + ".csv", lines.join("\n"));
