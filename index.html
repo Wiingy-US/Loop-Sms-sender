@@ -302,7 +302,7 @@
             <div class="drop-zone" id="dropZone">
               <input type="file" id="csvFile" accept=".csv" style="display:none" />
               <p>Drop CSV here or <a href="#" id="browseLink">browse</a></p>
-              <p class="hint">Columns: date | Bucket | Number | Name | Subject | Final Column | Message Format</p>
+              <p class="hint">Columns: date | Bucket | Number | Name | Subject | Sub Bucket | Final Column | Message Format</p>
             </div>
           </div>
 
@@ -934,7 +934,7 @@
     bulkRows = [];
     for (var i = 1; i < parsed.length; i++) {
       var cols = parsed[i];
-      if (cols.length < 7) continue;
+      if (cols.length < 8) continue;
       var num = (cols[2] || "").trim();
       if (!num) continue;
       bulkRows.push({
@@ -943,8 +943,9 @@
         number: num,
         name: (cols[3] || "").trim(),
         subject: (cols[4] || "").trim(),
-        finalCol: (cols[5] || "").trim(),
-        message: (cols[6] || "").trim(),
+        subBucket: (cols[5] || "").trim(),
+        finalCol: (cols[6] || "").trim(),
+        message: (cols[7] || "").trim(),
         error: "",
         errorSent: "",
         sentTime: ""
@@ -952,7 +953,7 @@
     }
     $("bulkRowCount").textContent = bulkRows.length + " rows loaded";
     if (bulkRows.length === 0) {
-      showBulkError("No valid rows found. Make sure columns A-G are filled.");
+      showBulkError("No valid rows found. Make sure columns A-H are filled.");
       $("bulkPreview").style.display = "none";
       $("bulkSendBtn").disabled = true;
       return;
@@ -965,11 +966,11 @@
 
   function renderPreview() {
     var limit = Math.min(bulkRows.length, 5);
-    var html = '<thead><tr><th>#</th><th>Bucket</th><th>Number</th><th>Name</th><th>Subject</th><th>Message (preview)</th></tr></thead><tbody>';
+    var html = '<thead><tr><th>#</th><th>Bucket</th><th>Number</th><th>Name</th><th>Subject</th><th>Sub Bucket</th><th>Message (preview)</th></tr></thead><tbody>';
     for (var i = 0; i < limit; i++) {
       var r = bulkRows[i];
       var msgPreview = r.message.length > 60 ? r.message.substring(0, 60) + "..." : r.message;
-      html += '<tr><td>' + (i + 1) + '</td><td>' + esc(r.bucket) + '</td><td>' + esc(r.number) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.subject) + '</td><td>' + esc(msgPreview) + '</td></tr>';
+      html += '<tr><td>' + (i + 1) + '</td><td>' + esc(r.bucket) + '</td><td>' + esc(r.number) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.subject) + '</td><td>' + esc(r.subBucket) + '</td><td>' + esc(msgPreview) + '</td></tr>';
     }
     html += '</tbody>';
     $("previewTable").innerHTML = html;
@@ -1168,7 +1169,7 @@
     dlBtn.className = "btn-send";
     dlBtn.textContent = "Download results CSV (" + total + " rows)";
     dlBtn.onclick = function() {
-      var lines = ["date,Bucket,Number,Name,Subject,Final Column,Message Format,Error,Error Sent,Sent Time"];
+      var lines = ["date,Bucket,Number,Name,Subject,Sub Bucket,Final Column,Message Format,Error,Error Sent,Sent Time"];
       for (var k = 0; k < bulkRows.length; k++) {
         var br = bulkRows[k];
         lines.push(
@@ -1177,6 +1178,7 @@
           csvField(br.number) + ',' +
           csvField(br.name) + ',' +
           csvField(br.subject) + ',' +
+          csvField(br.subBucket) + ',' +
           csvField(br.finalCol) + ',' +
           csvField(br.message) + ',' +
           csvField(br.error) + ',' +
