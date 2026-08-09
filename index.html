@@ -166,6 +166,26 @@
   .history-actions{margin-top:14px; display:flex; gap:8px; flex-wrap:wrap; align-items:center}
   .save-status{font-size:12px; color:var(--muted)}
 
+  /* Drop zone (Bulk Send) */
+  .drop-zone{
+    border:2px dashed var(--line); border-radius:10px; padding:28px 16px;
+    text-align:center; cursor:pointer; transition:border-color .2s, background .2s;
+    color:var(--muted); font-size:13px;
+  }
+  .drop-zone:hover,.drop-zone.drag{border-color:var(--accent); background:var(--accent-weak)}
+  .drop-zone a{color:var(--accent); text-decoration:underline; font-weight:600}
+  .drop-zone .file-name{color:var(--ink); font-weight:600; font-size:14px}
+  .bulk-preview{overflow-x:auto; margin-bottom:16px}
+  .bulk-preview table{width:100%; border-collapse:collapse; font-size:12px; min-width:700px}
+  .bulk-preview th{
+    text-align:left; font-weight:600; padding:6px 8px; border-bottom:2px solid var(--line);
+    color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em;
+    white-space:nowrap;
+  }
+  .bulk-preview td{padding:6px 8px; border-bottom:1px solid var(--line); max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .bulk-preview tr:last-child td{border-bottom:none}
+  .bulk-more{font-size:12px; color:var(--muted); margin-top:4px; font-style:italic}
+
   /* Responsive */
   @media(max-width:768px){
     .app{flex-direction:column}
@@ -192,6 +212,7 @@
     <div class="brand-sub">SMS Sender</div>
     <nav>
       <button class="nav-item active" data-tab="send">Send Messages</button>
+      <button class="nav-item" data-tab="bulk">Bulk Send</button>
       <button class="nav-item" data-tab="history" id="historyNav">Run History</button>
     </nav>
     <div class="spacer"></div>
@@ -254,6 +275,64 @@
             </div>
             <div class="log" id="log"></div>
             <div class="after" id="after"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BULK SEND TAB -->
+      <div id="tab-bulk" class="tab-pane">
+        <h1 class="page-title">Bulk Send</h1>
+        <p class="page-sub">Upload a CSV exported from Google Sheets. Each row carries its own message.</p>
+
+        <div class="panel">
+          <div class="row">
+            <div class="field">
+              <label for="bulkPassword">Access password</label>
+              <input id="bulkPassword" type="password" autocomplete="off" placeholder="your SEND_PASSWORD" />
+            </div>
+            <div class="field">
+              <label for="bulkFrom">From number <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+              <input id="bulkFrom" type="text" autocomplete="off" placeholder="+15555550100" />
+              <p class="hint">Blank uses the default set in Vercel.</p>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Upload CSV <span class="counter" id="bulkRowCount">0 rows loaded</span></label>
+            <div class="drop-zone" id="dropZone">
+              <input type="file" id="csvFile" accept=".csv" style="display:none" />
+              <p>Drop CSV here or <a href="#" id="browseLink">browse</a></p>
+              <p class="hint">Columns: date | Bucket | Number | Name | Subject | Final Column | Message Format</p>
+            </div>
+          </div>
+
+          <div id="bulkPreview" style="display:none">
+            <div class="bulk-preview">
+              <table id="previewTable"></table>
+            </div>
+            <p class="bulk-more" id="previewMore"></p>
+          </div>
+
+          <div class="field" style="max-width:220px">
+            <label for="bulkGap">Gap between messages</label>
+            <input id="bulkGap" type="number" value="2" min="1" step="0.5" />
+            <p class="hint">Seconds. Default 2.</p>
+          </div>
+
+          <div class="actions">
+            <button class="btn-send" id="bulkSendBtn" disabled>Send all rows</button>
+            <button class="btn-stop" id="bulkStopBtn" style="display:none">Stop</button>
+          </div>
+          <div class="msg" id="bulkError"></div>
+
+          <div class="progress" id="bulkProgress">
+            <div class="bar"><i id="bulkBarFill"></i></div>
+            <div class="stats">
+              <span class="live"><span class="dot" id="bulkDot"></span><span id="bulkStatusText">Sending...</span></span>
+              <span id="bulkCounts">0 / 0</span>
+            </div>
+            <div class="log" id="bulkLog"></div>
+            <div class="after" id="bulkAfter"></div>
           </div>
         </div>
       </div>
@@ -801,6 +880,340 @@
       after.appendChild(remBtn);
     }
   };
+
+  // -- Bulk Send --
+  var bulkRows = [];
+  var bulkRunning = false, bulkStopRequested = false;
+
+  function parseCSV(text) {
+    var rows = [];
+    var row = [];
+    var field = "";
+    var inQuotes = false;
+    for (var ci = 0; ci < text.length; ci++) {
+      var ch = text[ci];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (ci + 1 < text.length && text[ci + 1] === '"') {
+            field += '"';
+            ci++;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          field += ch;
+        }
+      } else {
+        if (ch === '"') {
+          inQuotes = true;
+        } else if (ch === ',') {
+          row.push(field);
+          field = "";
+        } else if (ch === '\n' || ch === '\r') {
+          if (ch === '\r' && ci + 1 < text.length && text[ci + 1] === '\n') ci++;
+          row.push(field);
+          field = "";
+          if (row.length > 1 || row[0] !== "") rows.push(row);
+          row = [];
+        } else {
+          field += ch;
+        }
+      }
+    }
+    row.push(field);
+    if (row.length > 1 || row[0] !== "") rows.push(row);
+    return rows;
+  }
+
+  function loadCSV(text) {
+    var parsed = parseCSV(text);
+    if (parsed.length < 2) {
+      showBulkError("CSV needs a header row and at least one data row.");
+      return;
+    }
+    bulkRows = [];
+    for (var i = 1; i < parsed.length; i++) {
+      var cols = parsed[i];
+      if (cols.length < 7) continue;
+      var num = (cols[2] || "").trim();
+      if (!num) continue;
+      bulkRows.push({
+        date: (cols[0] || "").trim(),
+        bucket: (cols[1] || "").trim(),
+        number: num,
+        name: (cols[3] || "").trim(),
+        subject: (cols[4] || "").trim(),
+        finalCol: (cols[5] || "").trim(),
+        message: (cols[6] || "").trim(),
+        error: "",
+        errorSent: "",
+        sentTime: ""
+      });
+    }
+    $("bulkRowCount").textContent = bulkRows.length + " rows loaded";
+    if (bulkRows.length === 0) {
+      showBulkError("No valid rows found. Make sure columns A-G are filled.");
+      $("bulkPreview").style.display = "none";
+      $("bulkSendBtn").disabled = true;
+      return;
+    }
+    clearBulkError();
+    renderPreview();
+    $("bulkSendBtn").disabled = false;
+    $("bulkSendBtn").textContent = "Send " + bulkRows.length + " messages";
+  }
+
+  function renderPreview() {
+    var limit = Math.min(bulkRows.length, 5);
+    var html = '<thead><tr><th>#</th><th>Bucket</th><th>Number</th><th>Name</th><th>Subject</th><th>Message (preview)</th></tr></thead><tbody>';
+    for (var i = 0; i < limit; i++) {
+      var r = bulkRows[i];
+      var msgPreview = r.message.length > 60 ? r.message.substring(0, 60) + "..." : r.message;
+      html += '<tr><td>' + (i + 1) + '</td><td>' + esc(r.bucket) + '</td><td>' + esc(r.number) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.subject) + '</td><td>' + esc(msgPreview) + '</td></tr>';
+    }
+    html += '</tbody>';
+    $("previewTable").innerHTML = html;
+    $("previewMore").textContent = bulkRows.length > 5 ? "... and " + (bulkRows.length - 5) + " more rows" : "";
+    $("bulkPreview").style.display = "block";
+  }
+
+  function esc(s) {
+    var d = document.createElement("span");
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function showBulkError(text) {
+    var box = $("bulkError");
+    box.textContent = text;
+    box.className = "msg err";
+  }
+  function clearBulkError() { $("bulkError").className = "msg"; }
+
+  function bulkLogLine(cls, text) {
+    var line = document.createElement("div");
+    line.className = cls;
+    line.textContent = text;
+    $("bulkLog").appendChild(line);
+    $("bulkLog").scrollTop = $("bulkLog").scrollHeight;
+  }
+
+  // File upload
+  $("browseLink").onclick = function(e) { e.preventDefault(); $("csvFile").click(); };
+  $("dropZone").onclick = function(e) { if (e.target.tagName !== "A") $("csvFile").click(); };
+  $("dropZone").ondragover = function(e) { e.preventDefault(); $("dropZone").classList.add("drag"); };
+  $("dropZone").ondragleave = function() { $("dropZone").classList.remove("drag"); };
+  $("dropZone").ondrop = function(e) {
+    e.preventDefault();
+    $("dropZone").classList.remove("drag");
+    var file = e.dataTransfer.files[0];
+    if (file) readCSVFile(file);
+  };
+  $("csvFile").onchange = function() {
+    if (this.files[0]) readCSVFile(this.files[0]);
+  };
+
+  function readCSVFile(file) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      $("dropZone").innerHTML = '<p class="file-name">' + esc(file.name) + '</p><p class="hint">Click or drop to replace</p>';
+      loadCSV(e.target.result);
+    };
+    reader.readAsText(file);
+  }
+
+  // Bulk send
+  $("bulkStopBtn").onclick = function() {
+    bulkStopRequested = true;
+    $("bulkStopBtn").disabled = true;
+    $("bulkStatusText").textContent = "Stopping after this message...";
+  };
+
+  $("bulkSendBtn").onclick = async function() {
+    if (bulkRunning || bulkRows.length === 0) return;
+    clearBulkError();
+
+    var password = $("bulkPassword").value.trim();
+    var from = $("bulkFrom").value.trim();
+    var gapMs = Math.max(1, parseFloat($("bulkGap").value) || 2) * 1000;
+
+    if (!password) return showBulkError("Enter the access password.");
+
+    var invalid = 0;
+    for (var v = 0; v < bulkRows.length; v++) {
+      if (!E164.test(bulkRows[v].number)) invalid++;
+    }
+    if (invalid === bulkRows.length) return showBulkError("No valid E.164 phone numbers found in column C.");
+
+    bulkRunning = true;
+    bulkStopRequested = false;
+    $("bulkSendBtn").disabled = true;
+    $("bulkStopBtn").style.display = "inline-block";
+    $("bulkStopBtn").disabled = false;
+    $("bulkProgress").classList.add("show");
+    $("bulkLog").textContent = "";
+    $("bulkAfter").textContent = "";
+    $("bulkDot").className = "dot";
+    $("bulkStatusText").textContent = "Sending...";
+
+    var total = bulkRows.length;
+    var sent = 0, failed = 0, skipped = 0, runSegments = 0;
+    var startTime = Date.now();
+    bulkLogLine("sys", "Starting - " + total + " messages, " + (gapMs / 1000) + "s gap.");
+
+    var i = 0;
+    for (; i < total; i++) {
+      if (bulkStopRequested) break;
+      var r = bulkRows[i];
+
+      if (!E164.test(r.number)) {
+        skipped++;
+        r.error = "yes";
+        r.errorSent = "Invalid E.164 number";
+        r.sentTime = fmtDate(new Date());
+        bulkLogLine("no", "X " + (r.number || "(blank)") + " - invalid number, skipped");
+      } else if (!r.message.trim()) {
+        skipped++;
+        r.error = "yes";
+        r.errorSent = "Empty message in column G";
+        r.sentTime = fmtDate(new Date());
+        bulkLogLine("no", "X " + shortNum(r.number) + " - no message, skipped");
+      } else {
+        try {
+          var res = await fetch("/api/send-one", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: password, from: from, to: r.number, content: r.message }),
+          });
+          var data = await res.json();
+          if (res.status === 401) {
+            failed++;
+            r.error = "yes";
+            r.errorSent = "Wrong access password";
+            r.sentTime = fmtDate(new Date());
+            showBulkError("Wrong access password - stopped.");
+            bulkLogLine("no", "X Wrong access password. Stopped.");
+            i++;
+            break;
+          }
+          if (data.ok) {
+            sent++;
+            runSegments += calcSegments(r.message);
+            r.error = "no";
+            r.errorSent = "";
+            r.sentTime = fmtDate(new Date());
+            bulkLogLine("ok", "OK " + shortNum(r.number) + (r.name ? " " + r.name : "") + (r.subject ? " [" + r.subject + "]" : ""));
+          } else {
+            failed++;
+            r.error = "yes";
+            r.errorSent = data.error || "Unknown error";
+            r.sentTime = fmtDate(new Date());
+            bulkLogLine("no", "X " + shortNum(r.number) + " - " + (data.error || "failed"));
+          }
+        } catch (err) {
+          failed++;
+          r.error = "yes";
+          r.errorSent = "Network error";
+          r.sentTime = fmtDate(new Date());
+          bulkLogLine("no", "X " + shortNum(r.number) + " - network error");
+        }
+      }
+
+      var done = i + 1;
+      $("bulkBarFill").style.width = (done / total * 100) + "%";
+      var left = total - done;
+      var eta = left * (gapMs + 700);
+      $("bulkCounts").textContent = done + " / " + total + (failed ? "  |  " + failed + " failed" : "") + (left ? "  |  ~" + fmtTime(eta) + " left" : "");
+
+      if (done < total && !bulkStopRequested) await sleep(gapMs);
+    }
+
+    var stopped = bulkStopRequested && i < total;
+    for (var j = i; j < total; j++) {
+      bulkRows[j].error = "yes";
+      bulkRows[j].errorSent = "Run stopped";
+      bulkRows[j].sentTime = "";
+      skipped++;
+    }
+
+    var elapsed = Date.now() - startTime;
+    var duration = fmtTime(elapsed);
+    var runCost = parseFloat((runSegments * 0.01).toFixed(2));
+
+    bulkRunning = false;
+    $("bulkSendBtn").disabled = false;
+    $("bulkStopBtn").style.display = "none";
+    $("bulkDot").className = "dot " + (failed ? "err" : "done");
+    $("bulkStatusText").textContent = stopped
+      ? "Stopped - sent " + sent + ", " + failed + " failed, " + (total - i) + " not sent."
+      : "Done - sent " + sent + (failed ? ", " + failed + " failed" : "") + ". " + runSegments + " seg, $" + runCost.toFixed(2) + ".";
+    bulkLogLine("sys", stopped
+      ? "Stopped at " + i + " of " + total + ". (" + duration + ")"
+      : "Finished. Sent " + sent + " of " + total + ". " + runSegments + " segments = $" + runCost.toFixed(2) + ". (" + duration + ")");
+
+    addRun({
+      timestamp: Date.now(),
+      total: total,
+      sent: sent,
+      failed: failed,
+      skipped: skipped,
+      duration: duration,
+      segments: runSegments,
+      cost: runCost
+    });
+
+    var after = $("bulkAfter");
+
+    var dlBtn = document.createElement("button");
+    dlBtn.className = "btn-send";
+    dlBtn.textContent = "Download results CSV (" + total + " rows)";
+    dlBtn.onclick = function() {
+      var lines = ["date,Bucket,Number,Name,Subject,Final Column,Message Format,Error,Error Sent,Sent Time"];
+      for (var k = 0; k < bulkRows.length; k++) {
+        var br = bulkRows[k];
+        lines.push(
+          csvField(br.date) + ',' +
+          csvField(br.bucket) + ',' +
+          csvField(br.number) + ',' +
+          csvField(br.name) + ',' +
+          csvField(br.subject) + ',' +
+          csvField(br.finalCol) + ',' +
+          csvField(br.message) + ',' +
+          csvField(br.error) + ',' +
+          csvField(br.errorSent) + ',' +
+          csvField(br.sentTime)
+        );
+      }
+      downloadCSV("bulk-results-" + new Date().toISOString().slice(0, 10) + ".csv", lines.join("\n"));
+    };
+    after.appendChild(dlBtn);
+
+    if (failed > 0 || skipped > 0) {
+      var failBtn = document.createElement("button");
+      failBtn.className = "btn-ghost";
+      var failCount = bulkRows.filter(function(br) { return br.error === "yes"; }).length;
+      failBtn.textContent = "Download " + failCount + " failed/skipped";
+      failBtn.onclick = function() {
+        var lines = ["Number,Name,Subject,Error Reason"];
+        for (var k = 0; k < bulkRows.length; k++) {
+          var br = bulkRows[k];
+          if (br.error === "yes") {
+            lines.push(csvField(br.number) + ',' + csvField(br.name) + ',' + csvField(br.subject) + ',' + csvField(br.errorSent));
+          }
+        }
+        downloadCSV("bulk-failed-" + new Date().toISOString().slice(0, 10) + ".csv", lines.join("\n"));
+      };
+      after.appendChild(failBtn);
+    }
+  };
+
+  function csvField(val) {
+    if (!val) return '""';
+    if (val.indexOf(',') > -1 || val.indexOf('"') > -1 || val.indexOf('\n') > -1) {
+      return '"' + val.replace(/"/g, '""') + '"';
+    }
+    return val;
+  }
 </script>
 </body>
 </html>
