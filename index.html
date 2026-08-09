@@ -1098,11 +1098,14 @@
         r.sentTime = fmtDate(new Date());
         bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - no message, skipped");
       } else {
+        var finalMsg = r.message
+          .replace(/\{\{\s*name\s*\}\}/gi, r.name)
+          .replace(/\{\{\s*subject\s*\}\}/gi, r.msgBucket);
         try {
           var res = await fetch("/api/send-one", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ password: password, from: from, to: r.number, content: r.message }),
+            body: JSON.stringify({ password: password, from: from, to: r.number, content: finalMsg }),
           });
           var data = await res.json();
           if (res.status === 401) {
@@ -1117,7 +1120,7 @@
           }
           if (data.ok) {
             sent++;
-            runSegments += calcSegments(r.message);
+            runSegments += calcSegments(finalMsg);
             r.error = "no";
             r.errorSent = "";
             r.sentTime = fmtDate(new Date());
