@@ -1008,8 +1008,9 @@
   }
 
   // File upload
-  $("browseLink").onclick = function(e) { e.preventDefault(); $("csvFile").click(); };
-  $("dropZone").onclick = function(e) { if (e.target.tagName !== "A") $("csvFile").click(); };
+  function triggerFileUpload() { $("csvFile").value = ""; $("csvFile").click(); }
+  $("browseLink").onclick = function(e) { e.preventDefault(); triggerFileUpload(); };
+  $("dropZone").onclick = function(e) { if (e.target.tagName !== "A") triggerFileUpload(); };
   $("dropZone").ondragover = function(e) { e.preventDefault(); $("dropZone").classList.add("drag"); };
   $("dropZone").ondragleave = function() { $("dropZone").classList.remove("drag"); };
   $("dropZone").ondrop = function(e) {
@@ -1026,6 +1027,10 @@
     var reader = new FileReader();
     reader.onload = function(e) {
       $("dropZone").innerHTML = '<p class="file-name">' + esc(file.name) + '</p><p class="hint">Click or drop to replace</p>';
+      $("bulkProgress").classList.remove("show");
+      $("bulkLog").textContent = "";
+      $("bulkAfter").textContent = "";
+      clearBulkError();
       loadCSV(e.target.result);
     };
     reader.readAsText(file);
