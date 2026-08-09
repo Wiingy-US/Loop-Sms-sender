@@ -883,7 +883,7 @@
 
   // -- Bulk Send --
   var bulkRows = [];
-  var bulkRunning = false, bulkStopRequested = false;
+  var bulkRunning = false, bulkStopRequested = false, bulkHasRun = false;
 
   function parseCSV(text) {
     var rows = [];
@@ -925,7 +925,14 @@
     return rows;
   }
 
+  function normalizePhone(raw) {
+    var stripped = raw.replace(/[\s\-\(\)\.]/g, "");
+    if (stripped && stripped[0] !== "+") stripped = "+" + stripped;
+    return stripped;
+  }
+
   function loadCSV(text) {
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
     var parsed = parseCSV(text);
     if (parsed.length < 2) {
       showBulkError("CSV needs a header row and at least one data row.");
@@ -935,12 +942,12 @@
     for (var i = 1; i < parsed.length; i++) {
       var cols = parsed[i];
       if (cols.length < 8) continue;
-      var num = (cols[2] || "").trim();
-      if (!num) continue;
+      var rawNum = (cols[2] || "").trim();
+      if (!rawNum) continue;
       bulkRows.push({
         date: (cols[0] || "").trim(),
         bucket: (cols[1] || "").trim(),
-        number: num,
+        number: normalizePhone(rawNum),
         name: (cols[3] || "").trim(),
         msgBucket: (cols[4] || "").trim(),
         subBucket: (cols[5] || "").trim(),
@@ -951,9 +958,10 @@
         sentTime: ""
       });
     }
+    bulkHasRun = false;
     $("bulkRowCount").textContent = bulkRows.length + " rows loaded";
     if (bulkRows.length === 0) {
-      showBulkError("No valid rows found. Make sure columns A-H are filled.");
+      showBulkError("No valid rows found. Make sure columns A–H are filled.");
       $("bulkPreview").style.display = "none";
       $("bulkSendBtn").disabled = true;
       return;
@@ -1034,6 +1042,8 @@
     if (bulkRunning || bulkRows.length === 0) return;
     clearBulkError();
 
+    if (bulkHasRun && !confirm("This will re-send ALL " + bulkRows.length + " messages. Continue?")) return;
+
     var password = $("bulkPassword").value.trim();
     var from = $("bulkFrom").value.trim();
     var gapMs = Math.max(1, parseFloat($("bulkGap").value) || 2) * 1000;
@@ -1044,9 +1054,16 @@
     for (var v = 0; v < bulkRows.length; v++) {
       if (!E164.test(bulkRows[v].number)) invalid++;
     }
-    if (invalid === bulkRows.length) return showBulkError("No valid E.164 phone numbers found in column C.");
+    if (invalid === bulkRows.length) return showBulkError("No valid phone numbers found in column C. Expected digits like 12675551234.");
+
+    for (var ri = 0; ri < bulkRows.length; ri++) {
+      bulkRows[ri].error = "";
+      bulkRows[ri].errorSent = "";
+      bulkRows[ri].sentTime = "";
+    }
 
     bulkRunning = true;
+    bulkHasRun = true;
     bulkStopRequested = false;
     $("bulkSendBtn").disabled = true;
     $("bulkStopBtn").style.display = "inline-block";
@@ -1060,25 +1077,26 @@
     var total = bulkRows.length;
     var sent = 0, failed = 0, skipped = 0, runSegments = 0;
     var startTime = Date.now();
-    bulkLogLine("sys", "Starting - " + total + " messages, " + (gapMs / 1000) + "s gap.");
+    bulkLogLine("sys", "Starting - " + total + " messages, " + (gapMs / 1000) + "s gap." + (invalid ? " " + invalid + " invalid numbers will be skipped." : ""));
 
     var i = 0;
     for (; i < total; i++) {
       if (bulkStopRequested) break;
       var r = bulkRows[i];
+      var rowLabel = "[row " + (i + 1) + "] ";
 
       if (!E164.test(r.number)) {
         skipped++;
         r.error = "yes";
-        r.errorSent = "Invalid E.164 number";
+        r.errorSent = "Invalid phone number";
         r.sentTime = fmtDate(new Date());
-        bulkLogLine("no", "X " + (r.number || "(blank)") + " - invalid number, skipped");
+        bulkLogLine("no", rowLabel + "X " + (r.number || "(blank)") + " - invalid number, skipped");
       } else if (!r.message.trim()) {
         skipped++;
         r.error = "yes";
-        r.errorSent = "Empty message in column G";
+        r.errorSent = "Empty message in column H";
         r.sentTime = fmtDate(new Date());
-        bulkLogLine("no", "X " + shortNum(r.number) + " - no message, skipped");
+        bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - no message, skipped");
       } else {
         try {
           var res = await fetch("/api/send-one", {
@@ -1093,7 +1111,7 @@
             r.errorSent = "Wrong access password";
             r.sentTime = fmtDate(new Date());
             showBulkError("Wrong access password - stopped.");
-            bulkLogLine("no", "X Wrong access password. Stopped.");
+            bulkLogLine("no", rowLabel + "X Wrong access password. Stopped.");
             i++;
             break;
           }
@@ -1103,20 +1121,20 @@
             r.error = "no";
             r.errorSent = "";
             r.sentTime = fmtDate(new Date());
-            bulkLogLine("ok", "OK " + shortNum(r.number) + (r.name ? " " + r.name : "") + (r.msgBucket ? " [" + r.msgBucket + "]" : ""));
+            bulkLogLine("ok", rowLabel + "OK " + shortNum(r.number) + (r.name ? " " + r.name : "") + (r.msgBucket ? " [" + r.msgBucket + "]" : ""));
           } else {
             failed++;
             r.error = "yes";
             r.errorSent = data.error || "Unknown error";
             r.sentTime = fmtDate(new Date());
-            bulkLogLine("no", "X " + shortNum(r.number) + " - " + (data.error || "failed"));
+            bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - " + (data.error || "failed"));
           }
         } catch (err) {
           failed++;
           r.error = "yes";
           r.errorSent = "Network error";
           r.sentTime = fmtDate(new Date());
-          bulkLogLine("no", "X " + shortNum(r.number) + " - network error");
+          bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - network error");
         }
       }
 
@@ -1132,7 +1150,7 @@
     var stopped = bulkStopRequested && i < total;
     for (var j = i; j < total; j++) {
       bulkRows[j].error = "yes";
-      bulkRows[j].errorSent = "Run stopped";
+      bulkRows[j].errorSent = "Run stopped - not sent";
       bulkRows[j].sentTime = "";
       skipped++;
     }
@@ -1167,7 +1185,7 @@
 
     var dlBtn = document.createElement("button");
     dlBtn.className = "btn-send";
-    dlBtn.textContent = "Download results CSV (" + total + " rows)";
+    dlBtn.textContent = "Download results CSV (" + total + " rows - paste back to Google Sheet)";
     dlBtn.onclick = function() {
       var lines = ["date,Bucket,Number,Name,Message Bucket,Sub Bucket,Final Column,Message Format,Error,Error Sent,Sent Time"];
       for (var k = 0; k < bulkRows.length; k++) {
@@ -1189,6 +1207,8 @@
       downloadCSV("bulk-results-" + new Date().toISOString().slice(0, 10) + ".csv", lines.join("\n"));
     };
     after.appendChild(dlBtn);
+
+    bulkLogLine("sys", "Summary: " + sent + " sent, " + failed + " failed, " + skipped + " skipped out of " + total + " total.");
 
     if (failed > 0 || skipped > 0) {
       var failBtn = document.createElement("button");
