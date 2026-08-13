@@ -1080,7 +1080,7 @@
     $("bulkStatusText").textContent = "Sending...";
 
     var total = bulkRows.length;
-    var sent = 0, failed = 0, skipped = 0, runSegments = 0;
+    var sent = 0, failed = 0, skipped = 0, runSegments = 0, consecutiveFails = 0;
     var startTime = Date.now();
     bulkLogLine("sys", "Starting - " + total + " messages, " + (gapMs / 1000) + "s gap." + (invalid ? " " + invalid + " invalid numbers will be skipped." : ""));
 
@@ -1125,6 +1125,7 @@
           }
           if (data.ok) {
             sent++;
+            consecutiveFails = 0;
             runSegments += calcSegments(finalMsg);
             r.error = "no";
             r.errorSent = "";
@@ -1132,10 +1133,17 @@
             bulkLogLine("ok", rowLabel + "OK " + shortNum(r.number) + (r.name ? " " + r.name : "") + (r.msgBucket ? " [" + r.msgBucket + "]" : ""));
           } else {
             failed++;
+            consecutiveFails++;
             r.error = "yes";
             r.errorSent = data.error || "Unknown error";
             r.sentTime = fmtDate(new Date());
             bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - " + (data.error || "failed"));
+            if (consecutiveFails >= 3) {
+              showBulkError("3 consecutive failures (" + (data.error || "unknown") + ") - stopped. Check your API key in Vercel.");
+              bulkLogLine("no", "Auto-stopped after 3 consecutive failures.");
+              i++;
+              break;
+            }
           }
         } catch (err) {
           failed++;
