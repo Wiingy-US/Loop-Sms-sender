@@ -521,10 +521,37 @@
     localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
   }
 
-  function addRun(run) {
+  function addRun(run, password) {
     sessionRuns.unshift(run);
     saveRunLocal(run);
     renderHistory();
+    if (password) autoSaveToRepo(run, password);
+  }
+
+  async function autoSaveToRepo(run, password) {
+    try {
+      var row = {
+        date: new Date(run.timestamp).toISOString(),
+        total: run.total,
+        sent: run.sent,
+        failed: run.failed,
+        skipped: run.skipped,
+        duration: run.duration,
+        segments: run.segments || 0,
+        cost: typeof run.cost === "number" ? run.cost.toFixed(2) : (run.cost || "0.00")
+      };
+      var res = await fetch("/api/history-save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: password, rows: [row] })
+      });
+      var data = await res.json();
+      if (data.ok) {
+        repoHistory.unshift(run);
+        sessionRuns = sessionRuns.filter(function(r) { return r !== run; });
+        renderHistory();
+      }
+    } catch(e) {}
   }
 
   function updateHistoryBadge() {
@@ -826,7 +853,7 @@
       duration: duration,
       segments: runSegments,
       cost: runCost
-    });
+    }, password);
 
     var after = $("after");
 
@@ -1195,7 +1222,7 @@
       duration: duration,
       segments: runSegments,
       cost: runCost
-    });
+    }, password);
 
     var after = $("bulkAfter");
 
