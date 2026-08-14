@@ -521,10 +521,37 @@
     localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
   }
 
-  function addRun(run) {
+  function addRun(run, password) {
     sessionRuns.unshift(run);
     saveRunLocal(run);
     renderHistory();
+    if (password) autoSaveToRepo(run, password);
+  }
+
+  async function autoSaveToRepo(run, password) {
+    try {
+      var row = {
+        date: new Date(run.timestamp).toISOString(),
+        total: run.total,
+        sent: run.sent,
+        failed: run.failed,
+        skipped: run.skipped,
+        duration: run.duration,
+        segments: run.segments || 0,
+        cost: typeof run.cost === "number" ? run.cost.toFixed(2) : (run.cost || "0.00")
+      };
+      var res = await fetch("/api/history-save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: password, rows: [row] })
+      });
+      var data = await res.json();
+      if (data.ok) {
+        repoHistory.unshift(run);
+        sessionRuns = sessionRuns.filter(function(r) { return r !== run; });
+        renderHistory();
+      }
+    } catch(e) {}
   }
 
   function updateHistoryBadge() {
@@ -826,7 +853,7 @@
       duration: duration,
       segments: runSegments,
       cost: runCost
-    });
+    }, password);
 
     var after = $("after");
 
@@ -1080,7 +1107,7 @@
     $("bulkStatusText").textContent = "Sending...";
 
     var total = bulkRows.length;
-    var sent = 0, failed = 0, skipped = 0, runSegments = 0;
+    var sent = 0, failed = 0, skipped = 0, runSegments = 0, consecutiveFails = 0;
     var startTime = Date.now();
     bulkLogLine("sys", "Starting - " + total + " messages, " + (gapMs / 1000) + "s gap." + (invalid ? " " + invalid + " invalid numbers will be skipped." : ""));
 
@@ -1125,6 +1152,7 @@
           }
           if (data.ok) {
             sent++;
+            consecutiveFails = 0;
             runSegments += calcSegments(finalMsg);
             r.error = "no";
             r.errorSent = "";
@@ -1132,10 +1160,17 @@
             bulkLogLine("ok", rowLabel + "OK " + shortNum(r.number) + (r.name ? " " + r.name : "") + (r.msgBucket ? " [" + r.msgBucket + "]" : ""));
           } else {
             failed++;
+            consecutiveFails++;
             r.error = "yes";
             r.errorSent = data.error || "Unknown error";
             r.sentTime = fmtDate(new Date());
             bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - " + (data.error || "failed"));
+            if (consecutiveFails >= 3) {
+              showBulkError("3 consecutive failures (" + (data.error || "unknown") + ") - stopped. Check your API key in Vercel.");
+              bulkLogLine("no", "Auto-stopped after 3 consecutive failures.");
+              i++;
+              break;
+            }
           }
         } catch (err) {
           failed++;
@@ -1187,7 +1222,7 @@
       duration: duration,
       segments: runSegments,
       cost: runCost
-    });
+    }, password);
 
     var after = $("bulkAfter");
 
