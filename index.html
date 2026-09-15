@@ -321,7 +321,8 @@
 
           <div class="actions">
             <button class="btn-send" id="bulkSendBtn" disabled>Send all rows</button>
-            <button class="btn-stop" id="bulkStopBtn" style="display:none">Stop</button>
+            <button class="btn-send" id="bulkPauseBtn" style="display:none">Pause</button>
+            <button class="btn-stop" id="bulkStopBtn" style="display:none">Cancel</button>
           </div>
           <div class="msg" id="bulkError"></div>
 
@@ -911,6 +912,9 @@
   // -- Bulk Send --
   var bulkRows = [];
   var bulkRunning = false, bulkStopRequested = false, bulkHasRun = false;
+  var bulkPaused = false, bulkIndex = 0;
+  var bulkSent = 0, bulkFailed = 0, bulkSkipped = 0, bulkSegments = 0, bulkConsecutiveFails = 0;
+  var bulkPassword = "", bulkFromNum = "", bulkGapMs = 2000, bulkStartTime = 0;
 
   function parseCSV(text) {
     var rows = [];
@@ -1063,168 +1067,80 @@
     reader.readAsText(file);
   }
 
-  // Bulk send
+  // Bulk send - Cancel button
   $("bulkStopBtn").onclick = function() {
     bulkStopRequested = true;
     $("bulkStopBtn").disabled = true;
-    $("bulkStatusText").textContent = "Stopping after this message...";
+    $("bulkStatusText").textContent = "Cancelling after this message...";
   };
 
-  $("bulkSendBtn").onclick = async function() {
-    if (bulkRunning || bulkRows.length === 0) return;
-    clearBulkError();
-
-    if (bulkHasRun && !confirm("This will re-send ALL " + bulkRows.length + " messages. Continue?")) return;
-
-    var password = $("bulkPassword").value.trim();
-    var from = $("bulkFrom").value.trim();
-    var gapMs = Math.max(1, parseFloat($("bulkGap").value) || 2) * 1000;
-
-    if (!password) return showBulkError("Enter the access password.");
-
-    var invalid = 0;
-    for (var v = 0; v < bulkRows.length; v++) {
-      if (!E164.test(bulkRows[v].number)) invalid++;
+  // Pause / Resume button
+  $("bulkPauseBtn").onclick = function() {
+    if (bulkPaused) {
+      bulkPaused = false;
+      $("bulkPauseBtn").textContent = "Pause";
+      $("bulkDot").className = "dot";
+      $("bulkStatusText").textContent = "Resuming...";
+      bulkConsecutiveFails = 0;
+      clearBulkError();
+      bulkSendLoop();
+    } else {
+      bulkPaused = true;
+      $("bulkPauseBtn").disabled = true;
+      $("bulkStatusText").textContent = "Pausing after this message...";
     }
-    if (invalid === bulkRows.length) return showBulkError("No valid phone numbers found in column C. Expected digits like 12675551234.");
+  };
 
-    for (var ri = 0; ri < bulkRows.length; ri++) {
-      bulkRows[ri].error = "";
-      bulkRows[ri].errorSent = "";
-      bulkRows[ri].sentTime = "";
-    }
-
-    bulkRunning = true;
-    bulkHasRun = true;
-    bulkStopRequested = false;
-    $("bulkSendBtn").disabled = true;
-    $("bulkStopBtn").style.display = "inline-block";
-    $("bulkStopBtn").disabled = false;
-    $("bulkProgress").classList.add("show");
-    $("bulkLog").textContent = "";
-    $("bulkAfter").textContent = "";
-    $("bulkDot").className = "dot";
-    $("bulkStatusText").textContent = "Sending...";
-
+  function bulkSetPausedUI() {
     var total = bulkRows.length;
-    var sent = 0, failed = 0, skipped = 0, runSegments = 0, consecutiveFails = 0;
-    var startTime = Date.now();
-    bulkLogLine("sys", "Starting - " + total + " messages, " + (gapMs / 1000) + "s gap." + (invalid ? " " + invalid + " invalid numbers will be skipped." : ""));
+    $("bulkPauseBtn").textContent = "Resume (" + (total - bulkIndex) + " remaining)";
+    $("bulkPauseBtn").disabled = false;
+    $("bulkDot").className = "dot err";
+    $("bulkStatusText").textContent = "Paused at row " + bulkIndex + " of " + total + " - sent " + bulkSent + ", " + bulkFailed + " failed.";
+    bulkLogLine("sys", "Paused at row " + bulkIndex + " of " + total + ". Click Resume to continue.");
+  }
 
-    var i = 0;
-    for (; i < total; i++) {
-      if (bulkStopRequested) break;
-      var r = bulkRows[i];
-      var rowLabel = "[row " + (i + 1) + "] ";
-
-      if (!E164.test(r.number)) {
-        skipped++;
-        r.error = "yes";
-        r.errorSent = "Invalid phone number";
-        r.sentTime = fmtDate(new Date());
-        bulkLogLine("no", rowLabel + "X " + (r.number || "(blank)") + " - invalid number, skipped");
-      } else if (!r.message.trim()) {
-        skipped++;
-        r.error = "yes";
-        r.errorSent = "Empty message in column H";
-        r.sentTime = fmtDate(new Date());
-        bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - no message, skipped");
-      } else {
-        var finalMsg = r.message
-          .replace(/\{\{\s*name\s*\}\}/gi, r.name)
-          .replace(/\{\{\s*subject\s*\}\}/gi, r.msgBucket);
-        try {
-          var res = await fetch("/api/send-one", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ password: password, from: from, to: r.number, content: finalMsg }),
-          });
-          var data = await res.json();
-          if (res.status === 401) {
-            failed++;
-            r.error = "yes";
-            r.errorSent = "Wrong access password";
-            r.sentTime = fmtDate(new Date());
-            showBulkError("Wrong access password - stopped.");
-            bulkLogLine("no", rowLabel + "X Wrong access password. Stopped.");
-            i++;
-            break;
-          }
-          if (data.ok) {
-            sent++;
-            consecutiveFails = 0;
-            runSegments += calcSegments(finalMsg);
-            r.error = "no";
-            r.errorSent = "";
-            r.sentTime = fmtDate(new Date());
-            bulkLogLine("ok", rowLabel + "OK " + shortNum(r.number) + (r.name ? " " + r.name : "") + (r.msgBucket ? " [" + r.msgBucket + "]" : ""));
-          } else {
-            failed++;
-            consecutiveFails++;
-            r.error = "yes";
-            r.errorSent = data.error || "Unknown error";
-            r.sentTime = fmtDate(new Date());
-            bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - " + (data.error || "failed"));
-            if (consecutiveFails >= 3) {
-              showBulkError("3 consecutive failures (" + (data.error || "unknown") + ") - stopped. Check your API key in Vercel.");
-              bulkLogLine("no", "Auto-stopped after 3 consecutive failures.");
-              i++;
-              break;
-            }
-          }
-        } catch (err) {
-          failed++;
-          r.error = "yes";
-          r.errorSent = "Network error";
-          r.sentTime = fmtDate(new Date());
-          bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - network error");
-        }
+  function bulkFinish(cancelled) {
+    var total = bulkRows.length;
+    if (cancelled) {
+      for (var j = bulkIndex; j < total; j++) {
+        bulkRows[j].error = "yes";
+        bulkRows[j].errorSent = "Run cancelled - not sent";
+        bulkRows[j].sentTime = "";
+        bulkSkipped++;
       }
-
-      var done = i + 1;
-      $("bulkBarFill").style.width = (done / total * 100) + "%";
-      var left = total - done;
-      var eta = left * (gapMs + 700);
-      $("bulkCounts").textContent = done + " / " + total + (failed ? "  |  " + failed + " failed" : "") + (left ? "  |  ~" + fmtTime(eta) + " left" : "");
-
-      if (done < total && !bulkStopRequested) await sleep(gapMs);
     }
 
-    var stopped = bulkStopRequested && i < total;
-    for (var j = i; j < total; j++) {
-      bulkRows[j].error = "yes";
-      bulkRows[j].errorSent = "Run stopped - not sent";
-      bulkRows[j].sentTime = "";
-      skipped++;
-    }
-
-    var elapsed = Date.now() - startTime;
+    var elapsed = Date.now() - bulkStartTime;
     var duration = fmtTime(elapsed);
-    var runCost = parseFloat((runSegments * 0.01).toFixed(2));
+    var runCost = parseFloat((bulkSegments * 0.01).toFixed(2));
 
     bulkRunning = false;
+    bulkPaused = false;
     $("bulkSendBtn").disabled = false;
+    $("bulkPauseBtn").style.display = "none";
     $("bulkStopBtn").style.display = "none";
-    $("bulkDot").className = "dot " + (failed ? "err" : "done");
-    $("bulkStatusText").textContent = stopped
-      ? "Stopped - sent " + sent + ", " + failed + " failed, " + (total - i) + " not sent."
-      : "Done - sent " + sent + (failed ? ", " + failed + " failed" : "") + ". " + runSegments + " seg, $" + runCost.toFixed(2) + ".";
-    bulkLogLine("sys", stopped
-      ? "Stopped at " + i + " of " + total + ". (" + duration + ")"
-      : "Finished. Sent " + sent + " of " + total + ". " + runSegments + " segments = $" + runCost.toFixed(2) + ". (" + duration + ")");
+    $("bulkDot").className = "dot " + (bulkFailed ? "err" : "done");
+    $("bulkStatusText").textContent = cancelled
+      ? "Cancelled - sent " + bulkSent + ", " + bulkFailed + " failed, " + bulkSkipped + " skipped."
+      : "Done - sent " + bulkSent + (bulkFailed ? ", " + bulkFailed + " failed" : "") + ". " + bulkSegments + " seg, $" + runCost.toFixed(2) + ".";
+    bulkLogLine("sys", cancelled
+      ? "Cancelled at row " + bulkIndex + " of " + total + ". (" + duration + ")"
+      : "Finished. Sent " + bulkSent + " of " + total + ". " + bulkSegments + " segments = $" + runCost.toFixed(2) + ". (" + duration + ")");
 
     addRun({
       timestamp: Date.now(),
       total: total,
-      sent: sent,
-      failed: failed,
-      skipped: skipped,
+      sent: bulkSent,
+      failed: bulkFailed,
+      skipped: bulkSkipped,
       duration: duration,
-      segments: runSegments,
+      segments: bulkSegments,
       cost: runCost
-    }, password);
+    }, bulkPassword);
 
     var after = $("bulkAfter");
+    after.textContent = "";
 
     var dlBtn = document.createElement("button");
     dlBtn.className = "btn-send";
@@ -1251,9 +1167,9 @@
     };
     after.appendChild(dlBtn);
 
-    bulkLogLine("sys", "Summary: " + sent + " sent, " + failed + " failed, " + skipped + " skipped out of " + total + " total.");
+    bulkLogLine("sys", "Summary: " + bulkSent + " sent, " + bulkFailed + " failed, " + bulkSkipped + " skipped out of " + total + " total.");
 
-    if (failed > 0 || skipped > 0) {
+    if (bulkFailed > 0 || bulkSkipped > 0) {
       var failBtn = document.createElement("button");
       failBtn.className = "btn-ghost";
       var failCount = bulkRows.filter(function(br) { return br.error === "yes"; }).length;
@@ -1270,6 +1186,157 @@
       };
       after.appendChild(failBtn);
     }
+  }
+
+  async function bulkSendLoop() {
+    var total = bulkRows.length;
+
+    for (; bulkIndex < total; bulkIndex++) {
+      if (bulkStopRequested) { bulkFinish(true); return; }
+      if (bulkPaused) { bulkSetPausedUI(); return; }
+
+      var r = bulkRows[bulkIndex];
+      var rowLabel = "[row " + (bulkIndex + 1) + "] ";
+
+      if (!E164.test(r.number)) {
+        bulkSkipped++;
+        r.error = "yes";
+        r.errorSent = "Invalid phone number";
+        r.sentTime = fmtDate(new Date());
+        bulkLogLine("no", rowLabel + "X " + (r.number || "(blank)") + " - invalid number, skipped");
+      } else if (!r.message.trim()) {
+        bulkSkipped++;
+        r.error = "yes";
+        r.errorSent = "Empty message in column H";
+        r.sentTime = fmtDate(new Date());
+        bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - no message, skipped");
+      } else {
+        var finalMsg = r.message
+          .replace(/\{\{\s*name\s*\}\}/gi, r.name)
+          .replace(/\{\{\s*subject\s*\}\}/gi, r.msgBucket);
+        try {
+          var res = await fetch("/api/send-one", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: bulkPassword, from: bulkFromNum, to: r.number, content: finalMsg }),
+          });
+          var data = await res.json();
+          if (res.status === 401) {
+            bulkFailed++;
+            r.error = "yes";
+            r.errorSent = "Wrong access password";
+            r.sentTime = fmtDate(new Date());
+            showBulkError("Wrong access password - stopped.");
+            bulkLogLine("no", rowLabel + "X Wrong access password. Stopped.");
+            bulkIndex++;
+            bulkFinish(true);
+            return;
+          }
+          if (data.ok) {
+            bulkSent++;
+            bulkConsecutiveFails = 0;
+            bulkSegments += calcSegments(finalMsg);
+            r.error = "no";
+            r.errorSent = "";
+            r.sentTime = fmtDate(new Date());
+            bulkLogLine("ok", rowLabel + "OK " + shortNum(r.number) + (r.name ? " " + r.name : "") + (r.msgBucket ? " [" + r.msgBucket + "]" : ""));
+
+            if (bulkSent > 0 && bulkSent % 150 === 0) {
+              bulkLogLine("sys", "Cooldown: sent " + bulkSent + " messages. Waiting 7 seconds...");
+              $("bulkStatusText").textContent = "Cooldown (7s after " + bulkSent + " sent)...";
+              await sleep(7000);
+              bulkLogLine("sys", "Cooldown complete. Resuming...");
+              $("bulkStatusText").textContent = "Sending...";
+            }
+          } else {
+            bulkFailed++;
+            bulkConsecutiveFails++;
+            r.error = "yes";
+            r.errorSent = data.error || "Unknown error";
+            r.sentTime = fmtDate(new Date());
+            bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - " + (data.error || "failed"));
+            if (bulkConsecutiveFails >= 3) {
+              showBulkError("3 consecutive failures (" + (data.error || "unknown") + ") - paused. Fix the issue and click Resume.");
+              bulkLogLine("no", "Auto-paused after 3 consecutive failures. Click Resume to continue.");
+              bulkIndex++;
+              bulkPaused = true;
+              bulkSetPausedUI();
+              return;
+            }
+          }
+        } catch (err) {
+          bulkFailed++;
+          r.error = "yes";
+          r.errorSent = "Network error";
+          r.sentTime = fmtDate(new Date());
+          bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - network error");
+        }
+      }
+
+      var done = bulkIndex + 1;
+      $("bulkBarFill").style.width = (done / total * 100) + "%";
+      var left = total - done;
+      var eta = left * (bulkGapMs + 700);
+      $("bulkCounts").textContent = done + " / " + total + (bulkFailed ? "  |  " + bulkFailed + " failed" : "") + (left ? "  |  ~" + fmtTime(eta) + " left" : "");
+
+      if (done < total && !bulkStopRequested && !bulkPaused) await sleep(bulkGapMs);
+    }
+
+    bulkFinish(false);
+  }
+
+  $("bulkSendBtn").onclick = function() {
+    if (bulkRunning || bulkRows.length === 0) return;
+    clearBulkError();
+
+    if (bulkHasRun && !confirm("This will re-send ALL " + bulkRows.length + " messages. Continue?")) return;
+
+    bulkPassword = $("bulkPassword").value.trim();
+    bulkFromNum = $("bulkFrom").value.trim();
+    bulkGapMs = Math.max(1, parseFloat($("bulkGap").value) || 2) * 1000;
+
+    if (!bulkPassword) return showBulkError("Enter the access password.");
+
+    var invalid = 0;
+    for (var v = 0; v < bulkRows.length; v++) {
+      if (!E164.test(bulkRows[v].number)) invalid++;
+    }
+    if (invalid === bulkRows.length) return showBulkError("No valid phone numbers found in column C. Expected digits like 12675551234.");
+
+    for (var ri = 0; ri < bulkRows.length; ri++) {
+      bulkRows[ri].error = "";
+      bulkRows[ri].errorSent = "";
+      bulkRows[ri].sentTime = "";
+    }
+
+    bulkRunning = true;
+    bulkHasRun = true;
+    bulkStopRequested = false;
+    bulkPaused = false;
+    bulkIndex = 0;
+    bulkSent = 0;
+    bulkFailed = 0;
+    bulkSkipped = 0;
+    bulkSegments = 0;
+    bulkConsecutiveFails = 0;
+    bulkStartTime = Date.now();
+
+    $("bulkSendBtn").disabled = true;
+    $("bulkPauseBtn").style.display = "inline-block";
+    $("bulkPauseBtn").disabled = false;
+    $("bulkPauseBtn").textContent = "Pause";
+    $("bulkStopBtn").style.display = "inline-block";
+    $("bulkStopBtn").disabled = false;
+    $("bulkProgress").classList.add("show");
+    $("bulkLog").textContent = "";
+    $("bulkAfter").textContent = "";
+    $("bulkDot").className = "dot";
+    $("bulkStatusText").textContent = "Sending...";
+
+    var total = bulkRows.length;
+    bulkLogLine("sys", "Starting - " + total + " messages, " + (bulkGapMs / 1000) + "s gap, cooldown every 150 sent." + (invalid ? " " + invalid + " invalid numbers will be skipped." : ""));
+
+    bulkSendLoop();
   };
 
   function csvField(val) {
