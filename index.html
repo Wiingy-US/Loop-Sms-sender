@@ -1240,14 +1240,6 @@
             r.errorSent = "";
             r.sentTime = fmtDate(new Date());
             bulkLogLine("ok", rowLabel + "OK " + shortNum(r.number) + (r.name ? " " + r.name : "") + (r.msgBucket ? " [" + r.msgBucket + "]" : ""));
-
-            if (bulkSent > 0 && bulkSent % 150 === 0) {
-              bulkLogLine("sys", "Cooldown: sent " + bulkSent + " messages. Waiting 7 seconds...");
-              $("bulkStatusText").textContent = "Cooldown (7s after " + bulkSent + " sent)...";
-              await sleep(7000);
-              bulkLogLine("sys", "Cooldown complete. Resuming...");
-              $("bulkStatusText").textContent = "Sending...";
-            }
           } else {
             bulkFailed++;
             bulkConsecutiveFails++;
@@ -1256,12 +1248,23 @@
             r.sentTime = fmtDate(new Date());
             bulkLogLine("no", rowLabel + "X " + shortNum(r.number) + " - " + (data.error || "failed"));
             if (bulkConsecutiveFails >= 3) {
-              showBulkError("3 consecutive failures (" + (data.error || "unknown") + ") - paused. Fix the issue and click Resume.");
-              bulkLogLine("no", "Auto-paused after 3 consecutive failures. Click Resume to continue.");
-              bulkIndex++;
-              bulkPaused = true;
-              bulkSetPausedUI();
-              return;
+              var retryStart = bulkIndex - 2;
+              bulkLogLine("sys", "3 consecutive failures (" + (data.error || "unknown") + "). Cooldown 30s then retrying rows " + (retryStart + 1) + "-" + (bulkIndex + 1) + "...");
+              $("bulkStatusText").textContent = "Cooldown (30s after 3 failures)...";
+              $("bulkDot").className = "dot err";
+              await sleep(30000);
+              if (bulkStopRequested) { bulkFinish(true); return; }
+              for (var ri = retryStart; ri <= bulkIndex; ri++) {
+                bulkRows[ri].error = "";
+                bulkRows[ri].errorSent = "";
+                bulkRows[ri].sentTime = "";
+                bulkFailed--;
+              }
+              bulkConsecutiveFails = 0;
+              bulkIndex = retryStart - 1;
+              $("bulkDot").className = "dot";
+              $("bulkStatusText").textContent = "Retrying...";
+              bulkLogLine("sys", "Cooldown complete. Retrying from row " + (retryStart + 1) + "...");
             }
           }
         } catch (err) {
@@ -1334,7 +1337,7 @@
     $("bulkStatusText").textContent = "Sending...";
 
     var total = bulkRows.length;
-    bulkLogLine("sys", "Starting - " + total + " messages, " + (bulkGapMs / 1000) + "s gap, cooldown every 150 sent." + (invalid ? " " + invalid + " invalid numbers will be skipped." : ""));
+    bulkLogLine("sys", "Starting - " + total + " messages, " + (bulkGapMs / 1000) + "s gap. Auto-retry on 3 consecutive failures (30s cooldown)." + (invalid ? " " + invalid + " invalid numbers will be skipped." : ""));
 
     bulkSendLoop();
   };
