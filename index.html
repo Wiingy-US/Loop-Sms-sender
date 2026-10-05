@@ -1244,6 +1244,15 @@
             r.errorSent = "";
             r.sentTime = fmtDate(new Date());
             bulkLogLine("ok", rowLabel + "OK " + shortNum(r.number) + (r.name ? " " + r.name : "") + (r.msgBucket ? " [" + r.msgBucket + "]" : ""));
+
+            if (bulkSent > 0 && bulkSent % 150 === 0) {
+              bulkLogLine("sys", "Cooldown: sent " + bulkSent + " messages. Waiting 7 seconds...");
+              $("bulkStatusText").textContent = "Cooldown (7s after " + bulkSent + " sent)...";
+              await sleep(7000);
+              if (bulkStopRequested) { bulkFinish(true); return; }
+              bulkLogLine("sys", "Cooldown complete. Resuming...");
+              $("bulkStatusText").textContent = "Sending...";
+            }
           } else {
             bulkFailed++;
             bulkConsecutiveFails++;
@@ -1341,7 +1350,7 @@
     $("bulkStatusText").textContent = "Sending...";
 
     var total = bulkRows.length;
-    bulkLogLine("sys", "Starting - " + total + " messages, " + (bulkGapMs / 1000) + "s gap. Auto-retry on 3 consecutive failures (30s cooldown)." + (invalid ? " " + invalid + " invalid numbers will be skipped." : ""));
+    bulkLogLine("sys", "Starting - " + total + " messages, " + (bulkGapMs / 1000) + "s gap, 7s cooldown every 150 sent. Auto-retry on 3 consecutive failures (30s cooldown)." + (invalid ? " " + invalid + " invalid numbers will be skipped." : ""));
 
     bulkSendLoop();
   };
