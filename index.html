@@ -972,7 +972,7 @@
     bulkRows = [];
     for (var i = 1; i < parsed.length; i++) {
       var cols = parsed[i];
-      if (cols.length < 8) continue;
+      if (cols.length < 10) continue;
       var rawNum = (cols[2] || "").trim();
       if (!rawNum) continue;
       bulkRows.push({
@@ -984,6 +984,8 @@
         subBucket: (cols[5] || "").trim(),
         finalCol: (cols[6] || "").trim(),
         message: (cols[7] || "").trim(),
+        sentPhone: normalizePhone((cols[8] || "").trim()),
+        campaignType: (cols[9] || "").trim(),
         error: "",
         errorSent: "",
         sentTime: ""
@@ -992,7 +994,7 @@
     bulkHasRun = false;
     $("bulkRowCount").textContent = bulkRows.length + " rows loaded";
     if (bulkRows.length === 0) {
-      showBulkError("No valid rows found. Make sure columns A–H are filled.");
+      showBulkError("No valid rows found. Make sure columns A–J are filled.");
       $("bulkPreview").style.display = "none";
       $("bulkSendBtn").disabled = true;
       return;
@@ -1005,11 +1007,11 @@
 
   function renderPreview() {
     var limit = Math.min(bulkRows.length, 5);
-    var html = '<thead><tr><th>#</th><th>Bucket</th><th>Number</th><th>Name</th><th>Msg Bucket</th><th>Sub Bucket</th><th>Message (preview)</th></tr></thead><tbody>';
+    var html = '<thead><tr><th>#</th><th>Bucket</th><th>To</th><th>Name</th><th>From</th><th>Msg Bucket</th><th>Message (preview)</th></tr></thead><tbody>';
     for (var i = 0; i < limit; i++) {
       var r = bulkRows[i];
       var msgPreview = r.message.length > 60 ? r.message.substring(0, 60) + "..." : r.message;
-      html += '<tr><td>' + (i + 1) + '</td><td>' + esc(r.bucket) + '</td><td>' + esc(r.number) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.msgBucket) + '</td><td>' + esc(r.subBucket) + '</td><td>' + esc(msgPreview) + '</td></tr>';
+      html += '<tr><td>' + (i + 1) + '</td><td>' + esc(r.bucket) + '</td><td>' + esc(r.number) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.sentPhone) + '</td><td>' + esc(r.msgBucket) + '</td><td>' + esc(msgPreview) + '</td></tr>';
     }
     html += '</tbody>';
     $("previewTable").innerHTML = html;
@@ -1146,7 +1148,7 @@
     dlBtn.className = "btn-send";
     dlBtn.textContent = "Download results CSV (" + total + " rows - paste back to Google Sheet)";
     dlBtn.onclick = function() {
-      var lines = ["date,Bucket,Number,Name,Message Bucket,Sub Bucket,Final Column,Message Format,Error,Error Sent,Sent Time"];
+      var lines = ["date,Bucket,Number,Name,Message Bucket,Sub Bucket,Final Column,Message Format,Sent Phone No,Campaign type,Error,Error Sent,Sent Time"];
       for (var k = 0; k < bulkRows.length; k++) {
         var br = bulkRows[k];
         lines.push(
@@ -1158,6 +1160,8 @@
           csvField(br.subBucket) + ',' +
           csvField(br.finalCol) + ',' +
           csvField(br.message) + ',' +
+          csvField(br.sentPhone) + ',' +
+          csvField(br.campaignType) + ',' +
           csvField(br.error) + ',' +
           csvField(br.errorSent) + ',' +
           csvField(br.sentTime)
@@ -1218,7 +1222,7 @@
           var res = await fetch("/api/send-one", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ password: bulkPassword, from: bulkFromNum, to: r.number, content: finalMsg }),
+            body: JSON.stringify({ password: bulkPassword, from: r.sentPhone || bulkFromNum, to: r.number, content: finalMsg }),
           });
           var data = await res.json();
           if (res.status === 401) {
